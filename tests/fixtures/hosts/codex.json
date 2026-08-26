@@ -1,0 +1,303 @@
+{
+  "cases": [
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "approval.requested",
+      "expected_capabilities": [
+        "notify",
+        "deny_action"
+      ],
+      "expected_native_output": null,
+      "expected_safe_facts": {},
+      "native_event": "PermissionRequest",
+      "native_input": {
+        "cwd": "/fixture/project",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "hook_event_name": "PermissionRequest",
+        "host_version": "fixture-current",
+        "session_id": "fixture-codex",
+        "turn_id": "turn-1"
+      },
+      "selected_policy": null
+    },
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "context.compacted",
+      "expected_capabilities": [
+        "add_context"
+      ],
+      "expected_native_output": null,
+      "expected_safe_facts": {},
+      "native_event": "PostCompact",
+      "native_input": {
+        "cwd": "/fixture/project",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "hook_event_name": "PostCompact",
+        "host_version": "fixture-current",
+        "session_id": "fixture-codex",
+        "turn_id": "turn-1"
+      },
+      "selected_policy": null
+    },
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "action.completed",
+      "expected_capabilities": [
+        "add_context"
+      ],
+      "expected_native_output": null,
+      "expected_safe_facts": {
+        "tool_class": "shell"
+      },
+      "native_event": "PostToolBatch",
+      "native_input": {
+        "cwd": "/fixture/project",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "hook_event_name": "PostToolBatch",
+        "host_version": "fixture-current",
+        "session_id": "fixture-codex",
+        "tool_input": {
+          "command": "private_fixture_command_7401"
+        },
+        "tool_name": "Shell",
+        "turn_id": "turn-1"
+      },
+      "selected_policy": null
+    },
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "action.completed",
+      "expected_capabilities": [
+        "add_context"
+      ],
+      "expected_native_output": null,
+      "expected_safe_facts": {
+        "tool_class": "shell"
+      },
+      "native_event": "PostToolUse",
+      "native_input": {
+        "cwd": "/fixture/project",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "hook_event_name": "PostToolUse",
+        "host_version": "fixture-current",
+        "session_id": "fixture-codex",
+        "tool_input": {
+          "command": "private_fixture_command_7401"
+        },
+        "tool_name": "Shell",
+        "turn_id": "turn-1"
+      },
+      "selected_policy": null
+    },
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "action.failed",
+      "expected_capabilities": [
+        "add_context"
+      ],
+      "expected_native_output": null,
+      "expected_safe_facts": {
+        "tool_class": "shell"
+      },
+      "native_event": "PostToolUseFailure",
+      "native_input": {
+        "cwd": "/fixture/project",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "hook_event_name": "PostToolUseFailure",
+        "host_version": "fixture-current",
+        "session_id": "fixture-codex",
+        "tool_input": {
+          "command": "private_fixture_command_7401"
+        },
+        "tool_name": "Shell",
+        "turn_id": "turn-1"
+      },
+      "selected_policy": null
+    },
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "context.compacting",
+      "expected_capabilities": [
+        "add_context"
+      ],
+      "expected_native_output": null,
+      "expected_safe_facts": {},
+      "native_event": "PreCompact",
+      "native_input": {
+        "cwd": "/fixture/project",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "hook_event_name": "PreCompact",
+        "host_version": "fixture-current",
+        "session_id": "fixture-codex",
+        "turn_id": "turn-1"
+      },
+      "selected_policy": null
+    },
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "action.proposed",
+      "expected_capabilities": [
+        "add_context",
+        "deny_action",
+        "replace_action"
+      ],
+      "expected_native_output": null,
+      "expected_safe_facts": {
+        "tool_class": "shell"
+      },
+      "native_event": "PreToolUse",
+      "native_input": {
+        "cwd": "/fixture/project",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "hook_event_name": "PreToolUse",
+        "host_version": "fixture-current",
+        "session_id": "fixture-codex",
+        "tool_input": {
+          "command": "private_fixture_command_7401"
+        },
+        "tool_name": "Shell",
+        "turn_id": "turn-1"
+      },
+      "selected_policy": null
+    },
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "session.closed",
+      "expected_capabilities": [],
+      "expected_native_output": null,
+      "expected_safe_facts": {},
+      "native_event": "SessionEnd",
+      "native_input": {
+        "cwd": "/fixture/project",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "hook_event_name": "SessionEnd",
+        "host_version": "fixture-current",
+        "session_id": "fixture-codex",
+        "turn_id": "turn-1"
+      },
+      "selected_policy": null
+    },
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "session.opened",
+      "expected_capabilities": [
+        "add_context"
+      ],
+      "expected_native_output": null,
+      "expected_safe_facts": {},
+      "native_event": "SessionStart",
+      "native_input": {
+        "cwd": "/fixture/project",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "hook_event_name": "SessionStart",
+        "host_version": "fixture-current",
+        "session_id": "fixture-codex",
+        "turn_id": "turn-1"
+      },
+      "selected_policy": null
+    },
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "turn.stopping",
+      "expected_capabilities": [
+        "continue_turn"
+      ],
+      "expected_native_output": null,
+      "expected_safe_facts": {},
+      "native_event": "Stop",
+      "native_input": {
+        "cwd": "/fixture/project",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "hook_event_name": "Stop",
+        "host_version": "fixture-current",
+        "session_id": "fixture-codex",
+        "turn_id": "turn-1"
+      },
+      "selected_policy": null
+    },
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "subagent.opened",
+      "expected_capabilities": [],
+      "expected_native_output": null,
+      "expected_safe_facts": {},
+      "native_event": "SubagentStart",
+      "native_input": {
+        "cwd": "/fixture/project",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "hook_event_name": "SubagentStart",
+        "host_version": "fixture-current",
+        "session_id": "fixture-codex",
+        "turn_id": "turn-1"
+      },
+      "selected_policy": null
+    },
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "subagent.closed",
+      "expected_capabilities": [
+        "continue_turn"
+      ],
+      "expected_native_output": null,
+      "expected_safe_facts": {},
+      "native_event": "SubagentStop",
+      "native_input": {
+        "cwd": "/fixture/project",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "hook_event_name": "SubagentStop",
+        "host_version": "fixture-current",
+        "session_id": "fixture-codex",
+        "turn_id": "turn-1"
+      },
+      "selected_policy": null
+    },
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "turn.prompted",
+      "expected_capabilities": [
+        "add_context",
+        "notify"
+      ],
+      "expected_native_output": null,
+      "expected_safe_facts": {},
+      "native_event": "UserPromptSubmit",
+      "native_input": {
+        "cwd": "/fixture/project",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "hook_event_name": "UserPromptSubmit",
+        "host_version": "fixture-current",
+        "session_id": "fixture-codex",
+        "turn_id": "turn-1"
+      },
+      "selected_policy": null
+    }
+  ],
+  "host": "codex",
+  "schema_version": 1
+}

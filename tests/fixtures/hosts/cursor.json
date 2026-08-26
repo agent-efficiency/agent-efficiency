@@ -1,0 +1,328 @@
+{
+  "cases": [
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "file.changed",
+      "expected_capabilities": [
+        "add_context"
+      ],
+      "expected_native_output": null,
+      "expected_safe_facts": {
+        "tool_class": "edit"
+      },
+      "native_event": "afterFileEdit",
+      "native_input": {
+        "conversation_id": "fixture-cursor",
+        "cursor_version": "fixture-current",
+        "file_path": "/fixture/project/private_fixture.py",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "generation_id": "turn-1",
+        "hook_event_name": "afterFileEdit",
+        "workspace_roots": [
+          "/fixture/project"
+        ]
+      },
+      "selected_policy": null
+    },
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "action.completed",
+      "expected_capabilities": [
+        "add_context"
+      ],
+      "expected_native_output": null,
+      "expected_safe_facts": {
+        "tool_class": "shell"
+      },
+      "native_event": "afterShellExecution",
+      "native_input": {
+        "command": "private_fixture_command_7401",
+        "conversation_id": "fixture-cursor",
+        "cursor_version": "fixture-current",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "generation_id": "turn-1",
+        "hook_event_name": "afterShellExecution",
+        "workspace_roots": [
+          "/fixture/project"
+        ]
+      },
+      "selected_policy": null
+    },
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "action.proposed",
+      "expected_capabilities": [
+        "deny_action"
+      ],
+      "expected_native_output": null,
+      "expected_safe_facts": {
+        "tool_class": "shell"
+      },
+      "native_event": "beforeShellExecution",
+      "native_input": {
+        "command": "private_fixture_command_7401",
+        "conversation_id": "fixture-cursor",
+        "cursor_version": "fixture-current",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "generation_id": "turn-1",
+        "hook_event_name": "beforeShellExecution",
+        "workspace_roots": [
+          "/fixture/project"
+        ]
+      },
+      "selected_policy": null
+    },
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "turn.prompted",
+      "expected_capabilities": [
+        "notify"
+      ],
+      "expected_native_output": null,
+      "expected_safe_facts": {},
+      "native_event": "beforeSubmitPrompt",
+      "native_input": {
+        "conversation_id": "fixture-cursor",
+        "cursor_version": "fixture-current",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "generation_id": "turn-1",
+        "hook_event_name": "beforeSubmitPrompt",
+        "workspace_roots": [
+          "/fixture/project"
+        ]
+      },
+      "selected_policy": null
+    },
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "action.completed",
+      "expected_capabilities": [
+        "add_context"
+      ],
+      "expected_native_output": null,
+      "expected_safe_facts": {
+        "tool_class": "shell"
+      },
+      "native_event": "postToolUse",
+      "native_input": {
+        "conversation_id": "fixture-cursor",
+        "cursor_version": "fixture-current",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "generation_id": "turn-1",
+        "hook_event_name": "postToolUse",
+        "tool_input": {
+          "command": "private_fixture_command_7401"
+        },
+        "tool_name": "Shell",
+        "workspace_roots": [
+          "/fixture/project"
+        ]
+      },
+      "selected_policy": null
+    },
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "action.failed",
+      "expected_capabilities": [],
+      "expected_native_output": null,
+      "expected_safe_facts": {
+        "tool_class": "shell"
+      },
+      "native_event": "postToolUseFailure",
+      "native_input": {
+        "conversation_id": "fixture-cursor",
+        "cursor_version": "fixture-current",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "generation_id": "turn-1",
+        "hook_event_name": "postToolUseFailure",
+        "tool_input": {
+          "command": "private_fixture_command_7401"
+        },
+        "tool_name": "Shell",
+        "workspace_roots": [
+          "/fixture/project"
+        ]
+      },
+      "selected_policy": null
+    },
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "context.compacting",
+      "expected_capabilities": [
+        "add_context"
+      ],
+      "expected_native_output": null,
+      "expected_safe_facts": {},
+      "native_event": "preCompact",
+      "native_input": {
+        "conversation_id": "fixture-cursor",
+        "cursor_version": "fixture-current",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "generation_id": "turn-1",
+        "hook_event_name": "preCompact",
+        "workspace_roots": [
+          "/fixture/project"
+        ]
+      },
+      "selected_policy": null
+    },
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "action.proposed",
+      "expected_capabilities": [
+        "deny_action"
+      ],
+      "expected_native_output": null,
+      "expected_safe_facts": {
+        "tool_class": "shell"
+      },
+      "native_event": "preToolUse",
+      "native_input": {
+        "conversation_id": "fixture-cursor",
+        "cursor_version": "fixture-current",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "generation_id": "turn-1",
+        "hook_event_name": "preToolUse",
+        "tool_input": {
+          "command": "private_fixture_command_7401"
+        },
+        "tool_name": "Shell",
+        "workspace_roots": [
+          "/fixture/project"
+        ]
+      },
+      "selected_policy": null
+    },
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "session.closed",
+      "expected_capabilities": [],
+      "expected_native_output": null,
+      "expected_safe_facts": {},
+      "native_event": "sessionEnd",
+      "native_input": {
+        "conversation_id": "fixture-cursor",
+        "cursor_version": "fixture-current",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "generation_id": "turn-1",
+        "hook_event_name": "sessionEnd",
+        "workspace_roots": [
+          "/fixture/project"
+        ]
+      },
+      "selected_policy": null
+    },
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "session.opened",
+      "expected_capabilities": [
+        "add_context"
+      ],
+      "expected_native_output": null,
+      "expected_safe_facts": {},
+      "native_event": "sessionStart",
+      "native_input": {
+        "conversation_id": "fixture-cursor",
+        "cursor_version": "fixture-current",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "generation_id": "turn-1",
+        "hook_event_name": "sessionStart",
+        "workspace_roots": [
+          "/fixture/project"
+        ]
+      },
+      "selected_policy": null
+    },
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "turn.stopping",
+      "expected_capabilities": [
+        "continue_turn"
+      ],
+      "expected_native_output": null,
+      "expected_safe_facts": {},
+      "native_event": "stop",
+      "native_input": {
+        "conversation_id": "fixture-cursor",
+        "cursor_version": "fixture-current",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "generation_id": "turn-1",
+        "hook_event_name": "stop",
+        "workspace_roots": [
+          "/fixture/project"
+        ]
+      },
+      "selected_policy": null
+    },
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "subagent.opened",
+      "expected_capabilities": [
+        "deny_action"
+      ],
+      "expected_native_output": null,
+      "expected_safe_facts": {},
+      "native_event": "subagentStart",
+      "native_input": {
+        "conversation_id": "fixture-cursor",
+        "cursor_version": "fixture-current",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "generation_id": "turn-1",
+        "hook_event_name": "subagentStart",
+        "workspace_roots": [
+          "/fixture/project"
+        ]
+      },
+      "selected_policy": null
+    },
+    {
+      "canonical_effect": "none",
+      "expected_canonical_event": "subagent.closed",
+      "expected_capabilities": [
+        "continue_turn"
+      ],
+      "expected_native_output": null,
+      "expected_safe_facts": {},
+      "native_event": "subagentStop",
+      "native_input": {
+        "conversation_id": "fixture-cursor",
+        "cursor_version": "fixture-current",
+        "future_contract_field": {
+          "private": "private_future_field_8642"
+        },
+        "generation_id": "turn-1",
+        "hook_event_name": "subagentStop",
+        "workspace_roots": [
+          "/fixture/project"
+        ]
+      },
+      "selected_policy": null
+    }
+  ],
+  "host": "cursor",
+  "schema_version": 1
+}

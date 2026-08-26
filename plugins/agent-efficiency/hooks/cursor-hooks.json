@@ -1,0 +1,88 @@
+{
+  "version": 1,
+  "description": "Fast, local Agent Efficiency lifecycle governance for Cursor.",
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "python3 -S \"${CURSOR_PLUGIN_ROOT}/scripts/agent_efficiency_hook.py\"",
+        "timeout": 2
+      }
+    ],
+    "beforeSubmitPrompt": [
+      {
+        "command": "python3 -S \"${CURSOR_PLUGIN_ROOT}/scripts/agent_efficiency_hook.py\"",
+        "timeout": 2
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "python3 -S \"${CURSOR_PLUGIN_ROOT}/scripts/agent_efficiency_hook.py\"",
+        "timeout": 2,
+        "matcher": "^(?!Shell$).*"
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "python3 -S \"${CURSOR_PLUGIN_ROOT}/scripts/agent_efficiency_hook.py\"",
+        "timeout": 2,
+        "matcher": "^(?!Shell$|Write$|Edit$).*"
+      }
+    ],
+    "postToolUseFailure": [
+      {
+        "command": "python3 -S \"${CURSOR_PLUGIN_ROOT}/scripts/agent_efficiency_hook.py\"",
+        "timeout": 2
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "python3 -S \"${CURSOR_PLUGIN_ROOT}/scripts/agent_efficiency_hook.py\"",
+        "timeout": 2
+      }
+    ],
+    "afterShellExecution": [
+      {
+        "command": "python3 -S \"${CURSOR_PLUGIN_ROOT}/scripts/agent_efficiency_hook.py\"",
+        "timeout": 2
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": "python3 -S \"${CURSOR_PLUGIN_ROOT}/scripts/agent_efficiency_hook.py\"",
+        "timeout": 2
+      }
+    ],
+    "subagentStart": [
+      {
+        "command": "python3 -S \"${CURSOR_PLUGIN_ROOT}/scripts/agent_efficiency_hook.py\"",
+        "timeout": 2
+      }
+    ],
+    "subagentStop": [
+      {
+        "command": "python3 -S \"${CURSOR_PLUGIN_ROOT}/scripts/agent_efficiency_hook.py\"",
+        "timeout": 2,
+        "loop_limit": 1
+      }
+    ],
+    "preCompact": [
+      {
+        "command": "python3 -S \"${CURSOR_PLUGIN_ROOT}/scripts/agent_efficiency_hook.py\"",
+        "timeout": 2
+      }
+    ],
+    "stop": [
+      {
+        "command": "python3 -S \"${CURSOR_PLUGIN_ROOT}/scripts/agent_efficiency_hook.py\"",
+        "timeout": 2,
+        "loop_limit": 1
+      }
+    ],
+    "sessionEnd": [
+      {
+        "command": "python3 -S \"${CURSOR_PLUGIN_ROOT}/scripts/agent_efficiency_hook.py\"",
+        "timeout": 1
+      }
+    ]
+  }
+}

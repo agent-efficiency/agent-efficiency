@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "agent-efficiency",
+  "version": "0.1.0",
+  "description": "Local verification and efficiency governance for coding agents.",
+  "owner": {
+    "name": "Agent Efficiency maintainers"
+  },
+  "plugins": [
+    {
+      "name": "agent-efficiency",
+      "source": "./plugins/agent-efficiency",
+      "description": "Privacy-safe evidence, sparse guidance, and local verification across coding agents.",
+      "category": "development"
+    }
+  ]
+}

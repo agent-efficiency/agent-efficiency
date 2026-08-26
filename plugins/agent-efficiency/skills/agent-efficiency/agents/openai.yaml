@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Efficiency"
+  short_description: "Verify changes and reduce repeated agent work"
+  default_prompt: "Use $agent-efficiency to show the current mode and local session signals."

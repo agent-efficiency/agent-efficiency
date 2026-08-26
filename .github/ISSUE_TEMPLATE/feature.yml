@@ -1,0 +1,38 @@
+name: Feature proposal
+description: Propose a bounded, testable product change.
+title: "proposal: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: Describe the repeated or consequential problem.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy and storage impact
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Acceptance evidence
+      description: State how we would know the change helped.
+    validations:
+      required: true
+  - type: textarea
+    id: stop
+    attributes:
+      label: Rejection or stop condition
+      description: State what result should cause us not to build or keep it.
+    validations:
+      required: true
