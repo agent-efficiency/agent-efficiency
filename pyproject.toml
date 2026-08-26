@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-efficiency"
+version = "0.1.0"
+description = "Local verification and efficiency governance for coding agents"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+  { name = "Agent Efficiency contributors" }
+]
+keywords = ["coding-agents", "claude-code", "cursor", "codex", "verification", "observability"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/agent-efficiency/agent-efficiency"
+Repository = "https://github.com/agent-efficiency/agent-efficiency"
+Issues = "https://github.com/agent-efficiency/agent-efficiency/issues"
+
+[project.scripts]
+agent-efficiency = "agent_efficiency.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "plugins/agent-efficiency/src" }
+
+[tool.setuptools.packages.find]
+where = ["plugins/agent-efficiency/src"]

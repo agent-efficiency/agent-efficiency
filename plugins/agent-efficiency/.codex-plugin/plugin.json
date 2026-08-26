@@ -1,0 +1,30 @@
+{
+  "name": "agent-efficiency",
+  "version": "0.1.0+codex.20260826184714",
+  "description": "Local verification and efficiency governance for coding agents.",
+  "author": {
+    "name": "Agent Efficiency maintainers",
+    "url": "https://github.com/agent-efficiency"
+  },
+  "homepage": "https://github.com/agent-efficiency/agent-efficiency",
+  "repository": "https://github.com/agent-efficiency/agent-efficiency",
+  "license": "MIT",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Agent Efficiency",
+    "shortDescription": "Verify changes and reduce coding-agent waste.",
+    "longDescription": "Agent Efficiency observes local lifecycle events, records only privacy-safe facts, gives sparse reviewed guidance, and tracks verification evidence across coding-agent sessions.",
+    "developerName": "Agent Efficiency maintainers",
+    "category": "Productivity",
+    "capabilities": [
+      "Local verification governance",
+      "Privacy-safe session evidence",
+      "Sparse efficiency guidance"
+    ],
+    "websiteURL": "https://github.com/agent-efficiency/agent-efficiency",
+    "privacyPolicyURL": "https://github.com/agent-efficiency/agent-efficiency/blob/main/SECURITY.md",
+    "defaultPrompt": [
+      "Use $agent-efficiency to show the current mode and local session signals."
+    ]
+  }
+}

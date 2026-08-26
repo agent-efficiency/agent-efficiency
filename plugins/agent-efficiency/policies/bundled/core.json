@@ -1,0 +1,191 @@
+{
+  "schema_version": 1,
+  "pack_id": "agent-efficiency-core",
+  "generated_at": "2026-08-26T00:00:00Z",
+  "policies": [
+    {
+      "id": "core.root-cause",
+      "title": "Distinguish causes before changing code",
+      "event": "UserPromptSubmit",
+      "kind": "task_guidance",
+      "task_types": [
+        "diagnose"
+      ],
+      "trigger_keywords": [],
+      "message": "Diagnosis checkpoint: capture the exact failure state, name the leading cause, and choose one focused check that can distinguish it from the next plausible cause.",
+      "status": "reviewed",
+      "reviewed_by": "agent-efficiency maintainers",
+      "reviewed_at": "2026-08-26T00:00:00Z",
+      "expires_at": "2036-08-26T00:00:00Z",
+      "constitutional_floor": true,
+      "source": {
+        "id": "agent-efficiency",
+        "url": "https://github.com/agent-efficiency/agent-efficiency",
+        "refs": [
+          "AE.DIAGNOSE.DISTINGUISH"
+        ]
+      }
+    },
+    {
+      "id": "core.break-failure-loop",
+      "title": "Change the conditions after repeated failure",
+      "event": "PostToolUse",
+      "kind": "failure_loop",
+      "threshold": 2,
+      "message": "Efficiency signal: this action has failed repeatedly. Do not run the same action again until the input, environment, or hypothesis changes.",
+      "status": "reviewed",
+      "reviewed_by": "agent-efficiency maintainers",
+      "reviewed_at": "2026-08-26T00:00:00Z",
+      "expires_at": "2036-08-26T00:00:00Z",
+      "constitutional_floor": true,
+      "source": {
+        "id": "agent-efficiency",
+        "url": "https://github.com/agent-efficiency/agent-efficiency",
+        "refs": [
+          "AE.FAILURE.CHANGE-INPUT"
+        ]
+      }
+    },
+    {
+      "id": "core.repeat-action",
+      "title": "Require new evidence from a repeated action",
+      "event": "PostToolUse",
+      "kind": "repeat_action",
+      "threshold": 3,
+      "message": "Efficiency signal: the same action is repeating. State what new evidence another run can produce. Reuse the prior result or change the target when it cannot.",
+      "status": "reviewed",
+      "reviewed_by": "agent-efficiency maintainers",
+      "reviewed_at": "2026-08-26T00:00:00Z",
+      "expires_at": "2036-08-26T00:00:00Z",
+      "constitutional_floor": true,
+      "source": {
+        "id": "agent-efficiency",
+        "url": "https://github.com/agent-efficiency/agent-efficiency",
+        "refs": [
+          "AE.REPEAT.NEW-EVIDENCE"
+        ]
+      }
+    },
+    {
+      "id": "core.narrow-search",
+      "title": "Search the smallest useful scope",
+      "event": "PostToolUse",
+      "kind": "broad_scan",
+      "threshold": 1,
+      "message": "Efficiency signal: this scan covers more of the filesystem than the current question requires. Start with the repository or likely subsystem, then widen only if the focused search is insufficient.",
+      "status": "reviewed",
+      "reviewed_by": "agent-efficiency maintainers",
+      "reviewed_at": "2026-08-26T00:00:00Z",
+      "expires_at": "2036-08-26T00:00:00Z",
+      "constitutional_floor": true,
+      "source": {
+        "id": "agent-efficiency",
+        "url": "https://github.com/agent-efficiency/agent-efficiency",
+        "refs": [
+          "AE.SEARCH.FOCUSED"
+        ]
+      }
+    },
+    {
+      "id": "core.repeat-install",
+      "title": "Check environment state before reinstalling",
+      "event": "PostToolUse",
+      "kind": "repeat_class",
+      "threshold": 2,
+      "command_class": "install",
+      "message": "Efficiency signal: dependency installation is repeating in this turn. Check the previous result and environment before another install.",
+      "status": "reviewed",
+      "reviewed_by": "agent-efficiency maintainers",
+      "reviewed_at": "2026-08-26T00:00:00Z",
+      "expires_at": "2036-08-26T00:00:00Z",
+      "constitutional_floor": true,
+      "source": {
+        "id": "agent-efficiency",
+        "url": "https://github.com/agent-efficiency/agent-efficiency",
+        "refs": [
+          "AE.INSTALL.CHECK-STATE"
+        ]
+      }
+    },
+    {
+      "id": "core.subagent-sprawl",
+      "title": "Give each subagent an independent question",
+      "event": "PostToolUse",
+      "kind": "subagent_count",
+      "threshold": 4,
+      "message": "Efficiency signal: subagent count is growing. Add another agent only for an independent, bounded question with a distinct output.",
+      "status": "reviewed",
+      "reviewed_by": "agent-efficiency maintainers",
+      "reviewed_at": "2026-08-26T00:00:00Z",
+      "expires_at": "2036-08-26T00:00:00Z",
+      "constitutional_floor": true,
+      "source": {
+        "id": "agent-efficiency",
+        "url": "https://github.com/agent-efficiency/agent-efficiency",
+        "refs": [
+          "AE.DELEGATE.BOUNDED"
+        ]
+      }
+    },
+    {
+      "id": "core.verify-change",
+      "title": "Verify changed behavior before completion",
+      "event": "Stop",
+      "kind": "unverified_change",
+      "threshold": 1,
+      "message": "Quality checkpoint: code changed, but no validation was observed. Run the smallest relevant behavior check, or state the concrete reason validation is blocked.",
+      "status": "reviewed",
+      "reviewed_by": "agent-efficiency maintainers",
+      "reviewed_at": "2026-08-26T00:00:00Z",
+      "expires_at": "2036-08-26T00:00:00Z",
+      "constitutional_floor": true,
+      "source": {
+        "id": "agent-efficiency",
+        "url": "https://github.com/agent-efficiency/agent-efficiency",
+        "refs": [
+          "AE.VERIFY.CHANGED-BEHAVIOR"
+        ]
+      }
+    },
+    {
+      "id": "core.fetch-before-branch",
+      "title": "Fetch before creating a branch",
+      "event": "PreToolUse",
+      "kind": "branch_without_observed_fetch",
+      "threshold": 1,
+      "message": "Repository checkpoint: no fetch was observed before branch creation. Fetch the intended remote and inspect the target branch. This observation does not prove the remote is current.",
+      "status": "reviewed",
+      "reviewed_by": "agent-efficiency maintainers",
+      "reviewed_at": "2026-08-26T00:00:00Z",
+      "expires_at": "2036-08-26T00:00:00Z",
+      "constitutional_floor": true,
+      "source": {
+        "id": "agent-efficiency",
+        "url": "https://github.com/agent-efficiency/agent-efficiency",
+        "refs": [
+          "AE.GIT.FETCH-BEFORE-BRANCH"
+        ]
+      }
+    },
+    {
+      "id": "core.compact-failure-loop",
+      "title": "Preserve unresolved failure state before compaction",
+      "event": "PreCompact",
+      "kind": "compaction_during_failure_loop",
+      "threshold": 2,
+      "message": "Context checkpoint: repeated failures are unresolved. Before compaction, preserve the failing state, current hypothesis, and next focused check.",
+      "status": "reviewed",
+      "reviewed_by": "agent-efficiency maintainers",
+      "reviewed_at": "2026-08-26T00:00:00Z",
+      "expires_at": "2036-08-26T00:00:00Z",
+      "constitutional_floor": true,
+      "source": {
+        "id": "agent-efficiency",
+        "url": "https://github.com/agent-efficiency/agent-efficiency",
+        "refs": [
+          "AE.CONTEXT.PRESERVE-FAILURE"
+        ]
+      }
+    }
+  ]
+}

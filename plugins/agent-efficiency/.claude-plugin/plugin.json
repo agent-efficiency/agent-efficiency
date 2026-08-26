@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "agent-efficiency",
+  "displayName": "Agent Efficiency",
+  "version": "0.1.0",
+  "description": "Local verification and efficiency governance for coding agents.",
+  "author": {
+    "name": "Agent Efficiency maintainers",
+    "url": "https://github.com/agent-efficiency"
+  },
+  "homepage": "https://github.com/agent-efficiency/agent-efficiency",
+  "repository": "https://github.com/agent-efficiency/agent-efficiency",
+  "license": "MIT",
+  "keywords": [
+    "efficiency",
+    "cost",
+    "tokens",
+    "coding-agents",
+    "observability"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks/claude-hooks.json"
+}

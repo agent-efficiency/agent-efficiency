@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/agent-efficiency/agent-efficiency/schemas/policy-pack.schema.json",
+  "title": "Agent Efficiency runtime policy pack",
+  "type": "object",
+  "required": ["schema_version", "pack_id", "generated_at", "policies"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "pack_id": { "type": "string", "minLength": 1 },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "content_digest": { "type": "string" },
+    "policies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "event",
+          "kind",
+          "message",
+          "status",
+          "reviewed_at",
+          "reviewed_by",
+          "expires_at",
+          "source"
+        ],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "event": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string", "minLength": 1 },
+          "message": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "status": { "const": "reviewed" },
+          "reviewed_at": { "type": "string", "format": "date-time" },
+          "reviewed_by": { "type": "string", "minLength": 1 },
+          "expires_at": { "type": "string", "format": "date-time" },
+          "source": { "type": "object" }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}
