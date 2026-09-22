@@ -51,6 +51,7 @@ from agent_efficiency.experiments import (
 )
 from agent_efficiency.statusline import process_statusline
 from agent_efficiency.store import Store, project_identity
+from agent_efficiency.vault import cli_commands as vault_commands
 from agent_efficiency.verification.config import load_project_config
 from agent_efficiency.verification.receipts import receipt_state
 from agent_efficiency.verification.runner import run_checks
@@ -73,6 +74,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override persistent data directory (also AGENT_EFFICIENCY_DATA).",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    vault_commands.register(subparsers)
 
     for mode_command in ("on", "off", "observe", "advise", "guard"):
         mode_parser = subparsers.add_parser(
@@ -282,6 +285,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _init_project()
     if args.command == "smoke-test":
         return _smoke_test(args)
+    if args.command == "vault":
+        # No vault command reads the database, so dispatch before the store is
+        # built. A git hook must still work when the data directory does not.
+        return vault_commands.dispatch(args)
     store = Store(args.data_dir)
     if args.command in {"on", "off", "observe", "advise", "guard", "mode"}:
         return _mode(args, store)
