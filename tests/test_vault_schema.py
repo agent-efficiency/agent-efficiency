@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from agent_efficiency.vault.frontmatter import FrontmatterError
-from agent_efficiency.vault.schema import CAPS, Note, load_note
+from agent_efficiency.vault.schema import CAPS, HOOK_CAP, Note, load_note
 
 VALID = (
     "---\n"
@@ -23,6 +23,18 @@ VALID = (
 
 
 class NoteSchemaTests(unittest.TestCase):
+    def test_hook_at_the_cap_is_accepted(self) -> None:
+        hook = "h" * HOOK_CAP
+        note = load_note(VALID.replace("hook: engine state and next move", f"hook: {hook}"))
+        self.assertEqual(note.hook, hook)
+
+    def test_hook_over_the_cap_is_refused_by_name(self) -> None:
+        hook = "h" * (HOOK_CAP + 1)
+        with self.assertRaises(FrontmatterError) as caught:
+            load_note(VALID.replace("hook: engine state and next move", f"hook: {hook}"))
+        self.assertIn("hook", str(caught.exception))
+        self.assertIn(str(HOOK_CAP), str(caught.exception))
+
     def test_loads_a_valid_note(self) -> None:
         note = load_note(VALID)
         self.assertIsInstance(note, Note)

@@ -31,6 +31,11 @@ CAPS = {
     "session": 1000,
 }
 
+# The hook is the one line a note contributes to every session that lists it,
+# so its length is paid on every session start. 100 characters keeps a full
+# core tree of index lines inside the rendered allowance.
+HOOK_CAP = 100
+
 
 @dataclass(frozen=True)
 class Note:
@@ -97,7 +102,7 @@ def load_note(text: str) -> Note:
         type=note_type,
         classification=classification,
         status=status,
-        hook=_scalar(fields, "hook"),
+        hook=_hook(fields),
         updated=_scalar(fields, "updated") if "updated" in fields else "",
         repos=_list(fields, "repos"),
         paths=_list(fields, "paths"),
@@ -126,6 +131,16 @@ def _scalar(fields: dict[str, str | list[str]], key: str) -> str:
     value = fields[key]
     if not isinstance(value, str):
         raise FrontmatterError(f"field {key!r} must be a scalar")
+    return value
+
+
+def _hook(fields: dict[str, str | list[str]]) -> str:
+    value = _scalar(fields, "hook")
+    if len(value) > HOOK_CAP:
+        raise FrontmatterError(
+            f"field 'hook' is {len(value)} characters, over the {HOOK_CAP} "
+            "character cap for a one-line hook"
+        )
     return value
 
 
