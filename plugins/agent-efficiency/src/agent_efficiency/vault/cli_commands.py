@@ -27,6 +27,7 @@ from agent_efficiency.paths import data_dir
 from agent_efficiency.vault import gitcontent
 from agent_efficiency.vault.config import (
     VaultConfigError,
+    load_trees,
     register_tree,
     stale_entries,
 )
@@ -53,6 +54,7 @@ from agent_efficiency.vault.root import (
     normalize_remote,
 )
 from agent_efficiency.vault.schema import CLASSIFICATIONS
+from agent_efficiency.vault.select import SelectionError, load_index
 from agent_efficiency.vault.walk import WalkError
 
 # Every error type the vault modules declare. The CLI is the one place that has
@@ -63,6 +65,7 @@ VAULT_ERRORS = (
     GitError,
     IndexError_,
     MigrationError,
+    SelectionError,
     VaultConfigError,
     VaultRootError,
     WalkError,
@@ -548,9 +551,14 @@ def _register(args: argparse.Namespace) -> int:
 
 def _show(args: argparse.Namespace) -> int:
     cwd = Path(args.cwd or os.getcwd())
-    prepared = prepare(cwd, data_dir(args.data_dir))
+    root = data_dir(args.data_dir)
+    prepared = prepare(cwd, root)
     if prepared.status != "ready":
         print(f"No vault context: {prepared.status} ({prepared.reason}).")
+        if prepared.status == "degraded":
+            detail = _degraded_detail(root)
+            if detail:
+                print(detail)
         return 0 if prepared.status == "unavailable" else 2
     rendered = prepared.rendered
     omitted = sum(count for _, count in rendered.omitted)
@@ -563,6 +571,25 @@ def _show(args: argparse.Namespace) -> int:
         f"omitted {omitted} | reason {prepared.reason or 'none'}"
     )
     return 0
+
+
+def _degraded_detail(data_root: Path) -> str | None:
+    """Rerun the checks that can fail and return the first error message.
+
+    The receipt holds only a reason code, so this is where a person sees which
+    entry or index is broken. Nothing here is stored.
+    """
+
+    try:
+        trees = load_trees(data_root)
+    except (VaultConfigError, SelectionError) as exc:
+        return str(exc)
+    for tree in trees:
+        try:
+            load_index(tree)
+        except (VaultConfigError, SelectionError) as exc:
+            return str(exc)
+    return None
 
 
 def _fail(message: str, *, as_json: bool = False) -> int:

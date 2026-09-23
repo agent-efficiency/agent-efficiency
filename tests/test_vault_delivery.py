@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import subprocess
 import sys
@@ -10,8 +11,9 @@ from pathlib import Path
 from unittest import mock
 
 import agent_efficiency
-from agent_efficiency.hook import CURSOR_SESSION_CONTEXT, run_hook
+from agent_efficiency.hook import CURSOR_SESSION_CONTEXT, VAULT_CONFIG_NAME, run_hook
 from agent_efficiency.store import Store
+from agent_efficiency.vault.config import CONFIG_NAME
 from agent_efficiency.vault.index import write_index
 from agent_efficiency.vault.render import UNMAPPED
 from agent_efficiency.vault_delivery import (
@@ -338,6 +340,16 @@ class SessionStartDeliveryTests(VaultDeliveryBase):
             ("request", "unavailable", "host_unsupported"),
         )
 
+    def test_explicit_request_in_off_mode_records_nothing(self) -> None:
+        self.claude("UserPromptSubmit", prompt="$agent-efficiency off")
+        output = self.claude("UserPromptSubmit", prompt="$agent-efficiency vault")
+        self.assertIn(
+            "Agent Efficiency is off for this session. Turn it on to load vault "
+            "context.",
+            output["stopReason"],
+        )
+        self.assertEqual(self.receipts("s-claude"), [])
+
     def test_explicit_request_without_a_vault_says_how_to_register(self) -> None:
         (self.store.paths.root / "vault.json").unlink()
         output = self.claude("UserPromptSubmit", prompt="$agent-efficiency vault")
@@ -361,6 +373,43 @@ class SessionStartDeliveryTests(VaultDeliveryBase):
         self.assertEqual(self.receipts("s-cloud"), [("deferred", "deferred", None)])
         again = self.tool_result("s-cloud") or {}
         self.assertNotIn(HEAD, again.get("additional_context", ""))
+
+    def test_cursor_vault_request_does_not_block_the_deferred_delivery(
+        self,
+    ) -> None:
+        request = self.cursor(
+            "beforeSubmitPrompt", session="s-cloud", prompt="$agent-efficiency vault"
+        )
+        self.assertIn("first tool result", request["user_message"])
+        output = self.tool_result("s-cloud")
+        self.assertIn(HEAD, output["additional_context"])
+        self.assertEqual(
+            self.receipts("s-cloud"),
+            [
+                ("request", "unavailable", "host_unsupported"),
+                ("deferred", "deferred", None),
+            ],
+        )
+
+    def test_cursor_code_edit_merges_the_checkpoint_and_the_vault(self) -> None:
+        self.cursor(
+            "beforeSubmitPrompt",
+            session="s-edit",
+            prompt="Implement a substantial feature with tests.",
+        )
+        output = self.cursor(
+            "postToolUse",
+            session="s-edit",
+            tool_name="Write",
+            tool_input={"file_path": str(self.project / "app.py"), "content": "x"},
+            tool_output='{"success":true}',
+            duration=8,
+        )
+        text = output["additional_context"]
+        self.assertTrue(text.startswith("Agent Efficiency: Quality checkpoint:"))
+        self.assertIn("\n\nVault context:", text)
+        self.assertIn(HEAD, text)
+        self.assertEqual(self.receipts("s-edit"), [("deferred", "deferred", None)])
 
     def test_cursor_with_session_start_is_not_delivered_twice(self) -> None:
         self.cursor("sessionStart", session="s-local")
@@ -412,6 +461,7 @@ class SessionStartDeliveryTests(VaultDeliveryBase):
 
 
 LAZY_IMPORT_PROBE = """
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -419,40 +469,63 @@ from pathlib import Path
 from agent_efficiency.hook import run_hook
 from agent_efficiency.store import Store
 
+payload, environ = json.loads(sys.argv[1])
 with tempfile.TemporaryDirectory() as temp:
     store = Store(Path(temp) / "data")
-    run_hook(
-        {
-            "session_id": "s-lazy",
-            "cwd": temp,
-            "hook_event_name": "UserPromptSubmit",
-            "prompt": "Explain the parser.",
-            "prompt_id": "t1",
-        },
-        store=store,
-        environ={"CLAUDE_PLUGIN_ROOT": "/plugin"},
-    )
+    payload = json.loads(json.dumps(payload).replace("@TEMP@", temp))
+    run_hook(payload, store=store, environ=environ)
 loaded = sorted(
     name
     for name in sys.modules
-    if name == "agent_efficiency.vault_delivery"
+    if name in {"agent_efficiency.vault", "agent_efficiency.vault_delivery"}
     or name.startswith("agent_efficiency.vault.")
 )
 print(",".join(loaded))
 """
+LAZY_IMPORT_CASES = {
+    "claude prompt": (
+        {
+            "session_id": "s-lazy",
+            "cwd": "@TEMP@",
+            "hook_event_name": "UserPromptSubmit",
+            "prompt": "Explain the parser.",
+            "prompt_id": "t1",
+        },
+        {"CLAUDE_PLUGIN_ROOT": "/plugin"},
+    ),
+    "cursor tool result without a vault": (
+        {
+            "conversation_id": "s-lazy",
+            "generation_id": "g-1",
+            "cursor_version": "1.7.2",
+            "workspace_roots": ["@TEMP@"],
+            "hook_event_name": "postToolUse",
+            "tool_name": "Read",
+            "tool_input": {"file_path": "@TEMP@/README"},
+            "tool_output": '{"success":true}',
+            "duration": 5,
+        },
+        {},
+    ),
+}
 
 
 class HookImportTests(unittest.TestCase):
     def test_an_ordinary_hook_event_does_not_load_vault_delivery(self) -> None:
         source = Path(agent_efficiency.__file__).resolve().parents[1]
-        result = subprocess.run(
-            [sys.executable, "-c", LAZY_IMPORT_PROBE],
-            env={"PYTHONPATH": str(source), "PATH": "/usr/bin:/bin"},
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        self.assertEqual(result.stdout.strip(), "")
+        for name, case in LAZY_IMPORT_CASES.items():
+            with self.subTest(case=name):
+                result = subprocess.run(
+                    [sys.executable, "-c", LAZY_IMPORT_PROBE, json.dumps(case)],
+                    env={"PYTHONPATH": str(source), "PATH": "/usr/bin:/bin"},
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                self.assertEqual(result.stdout.strip(), "")
+
+    def test_config_name_matches_the_vault_config(self) -> None:
+        self.assertEqual(VAULT_CONFIG_NAME, CONFIG_NAME)
 
 
 if __name__ == "__main__":

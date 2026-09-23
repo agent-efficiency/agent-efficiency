@@ -50,7 +50,17 @@ class VaultReceiptTests(unittest.TestCase):
         self.record()
         data = build_report(self.store, 30)
         self.assertEqual(data["vault"]["emitted"], 1)
-        self.assertIn("Vault context: selected 1 | emitted 1", format_report(data))
+        self.assertIn(
+            "Vault context: selected 1 | emitted 1 (900 characters, project "
+            "heads 120) | deferred 0 | unavailable 0 | skipped 0 | withheld 0 | "
+            "degraded 0\n",
+            format_report(data),
+        )
+
+    def test_report_omits_the_vault_line_without_receipts(self) -> None:
+        data = build_report(self.store, 30)
+        self.assertEqual(data["vault"]["receipts"], 0)
+        self.assertNotIn("Vault context", format_report(data))
 
     def test_rejects_free_text(self) -> None:
         for override in (
@@ -67,8 +77,12 @@ class VaultReceiptTests(unittest.TestCase):
 
     def test_summary_counts_each_quantity_separately(self) -> None:
         self.record()
-        self.record(cause="deferred", disposition="deferred", chars_emitted=400, head_chars=0)
-        self.record(disposition="unavailable", reason_code="host_unsupported", chars_emitted=0)
+        self.record(
+            cause="deferred", disposition="deferred", chars_emitted=400, head_chars=0
+        )
+        self.record(
+            disposition="unavailable", reason_code="host_unsupported", chars_emitted=0
+        )
         self.record(disposition="withheld", reason_code="observe_mode", chars_emitted=0)
         summary = self.store.vault_summary(30)
         self.assertEqual(
@@ -84,16 +98,12 @@ class VaultReceiptTests(unittest.TestCase):
             ),
             (4, 4, 2, 1300, 120, 1, 1, 1),
         )
-        self.assertEqual(
-            summary["reasons"], {"host_unsupported": 1, "observe_mode": 1}
-        )
+        self.assertEqual(summary["reasons"], {"host_unsupported": 1, "observe_mode": 1})
 
     def test_migrates_a_schema_6_database(self) -> None:
         with closing(sqlite3.connect(self.store.paths.database)) as conn:
             conn.execute("DROP TABLE vault_receipts")
-            conn.execute(
-                "UPDATE settings SET value = '6' WHERE key = 'schema_version'"
-            )
+            conn.execute("UPDATE settings SET value = '6' WHERE key = 'schema_version'")
             conn.commit()
         migrated = Store(self.temp.name)
         migrated.ensure_current_schema()

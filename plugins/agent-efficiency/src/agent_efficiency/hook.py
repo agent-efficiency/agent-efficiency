@@ -42,6 +42,10 @@ CURSOR_SESSION_CONTEXT = (
     "Efficiency messages are advisory checkpoints. Only local metadata is "
     "recorded; prompts, commands, code, outputs, and transcripts are not stored."
 )
+# Must equal agent_efficiency.vault.config.CONFIG_NAME. It is repeated here so
+# a hook event can see that no vault is registered without importing the vault
+# modules.
+VAULT_CONFIG_NAME = "vault.json"
 VAULT_REQUEST_MESSAGES = {
     "no_trees": (
         "No vault tree is registered. Run agent-efficiency vault register "
@@ -50,7 +54,8 @@ VAULT_REQUEST_MESSAGES = {
     "observe_mode": "Observe mode records vault selection but does not add it.",
     "host_unsupported": (
         "This host cannot add context from a prompt. Vault context is added "
-        "at session start."
+        "at session start, or at the first tool result when the host has no "
+        "session start."
     ),
 }
 
@@ -835,7 +840,9 @@ def _deferred_vault(
     """
 
     try:
-        if store.has_vault_receipt(session_id):
+        if not (store.paths.root / VAULT_CONFIG_NAME).is_file():
+            return None
+        if store.has_vault_receipt(session_id, exclude_cause="request"):
             return None
     except (OSError, ValueError, sqlite3.Error):
         return None

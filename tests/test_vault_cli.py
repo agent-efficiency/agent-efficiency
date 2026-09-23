@@ -826,6 +826,17 @@ class VaultRegisterAndShowTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("Dropped a registered tree that no longer exists", out)
 
+    def test_register_reports_an_unwritable_tree_list(self) -> None:
+        with mock.patch(
+            "agent_efficiency.vault.config._write",
+            side_effect=PermissionError(13, "Permission denied"),
+        ):
+            code, out, err = run_both(self.cli("register", str(self.core)))
+        self.assertEqual(code, 2)
+        self.assertIn(str(self.data / "vault.json"), err)
+        self.assertIn("Permission denied", err)
+        self.assertNotIn("Traceback", out + err)
+
     def test_register_refuses_a_directory_that_is_not_a_tree(self) -> None:
         code, _, err = run_both(self.cli("register", str(self.base)))
         self.assertEqual(code, 2)
@@ -835,6 +846,15 @@ class VaultRegisterAndShowTests(unittest.TestCase):
         code, out = run(self.cli("show", "--cwd", str(self.project)))
         self.assertEqual(code, 0)
         self.assertIn("No vault context: unavailable (no_trees)", out)
+
+    def test_show_says_why_a_moved_tree_degrades_the_context(self) -> None:
+        run(self.cli("register", str(self.core)))
+        self.core.rename(self.base / "moved-core")
+        code, out, err = run_both(self.cli("show", "--cwd", str(self.project)))
+        self.assertEqual(code, 2)
+        self.assertIn("No vault context: degraded (parse_error)", out)
+        self.assertIn("Fix or remove the entry in", out)
+        self.assertNotIn("Traceback", out + err)
 
     def test_show_reports_an_unreadable_config_path(self) -> None:
         run(self.cli("register", str(self.core)))

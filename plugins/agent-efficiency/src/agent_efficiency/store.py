@@ -1600,13 +1600,19 @@ class Store:
             ).fetchone()
         return dict(row) if row else None
 
-    def has_vault_receipt(self, session_id: str) -> bool:
+    def has_vault_receipt(
+        self, session_id: str, *, exclude_cause: str | None = None
+    ) -> bool:
+        """Return whether the session has a receipt, ignoring one cause if given."""
+
         self.ensure_current_schema()
+        query = "SELECT 1 FROM vault_receipts WHERE session_id = ?"
+        params: list[Any] = [session_id]
+        if exclude_cause is not None:
+            query += " AND cause != ?"
+            params.append(exclude_cause)
         with self.connect() as conn:
-            row = conn.execute(
-                "SELECT 1 FROM vault_receipts WHERE session_id = ? LIMIT 1",
-                (session_id,),
-            ).fetchone()
+            row = conn.execute(f"{query} LIMIT 1", params).fetchone()
         return row is not None
 
     def vault_summary(

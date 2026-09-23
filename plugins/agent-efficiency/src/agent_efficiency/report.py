@@ -146,7 +146,7 @@ def format_report(data: dict[str, Any]) -> str:
         f"false or unnecessary={_rate_text(false_rate)}"
     )
     vault = data.get("vault")
-    if vault:
+    if vault and vault.get("receipts"):
         lines.append(
             f"Vault context: selected {vault['selected']} | "
             f"emitted {vault['emitted']} ({vault['chars_emitted']} characters, "

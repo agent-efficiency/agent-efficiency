@@ -1,8 +1,10 @@
 """No vault identifier may reach the runtime store, its journals, or a report.
 
-Every canary does reach the host output in at least one case below. That is
-checked too, so a pass means the value was handled and kept out, not that it
-was never read.
+The owner, repo, and branch canaries are selection inputs: they pick the
+project note and never reach host output. Every other canary does reach the
+host output in at least one case below. That is checked too, so a pass means
+the value was handled and kept out, not that it was never read. The receipt
+list is checked in full, so a path that silently did nothing fails the test.
 """
 
 from __future__ import annotations
@@ -40,9 +42,7 @@ class VaultPrivacyCanaryTests(unittest.TestCase):
             store = Store(base / "data")
             project = make_repo(
                 base / "project",
-                remotes={
-                    "origin": "git@git.example.com:canaryowner7731/canaryrepo7731.git"
-                },
+                remotes={"origin": "git@git.example.com:canaryowner7731/canaryrepo7731.git"},
                 branch="canarybranch7731",
             )
             (project / "src").mkdir()
@@ -88,7 +88,12 @@ class VaultPrivacyCanaryTests(unittest.TestCase):
                 return run_hook(payload, store=store, environ=CLAUDE_ENV)
 
             first = claude("s1", project / "src", "SessionStart", source="startup")
-            claude("s1", project / "src", "UserPromptSubmit", prompt="$agent-efficiency vault")
+            claude(
+                "s1",
+                project / "src",
+                "UserPromptSubmit",
+                prompt="$agent-efficiency vault",
+            )
             claude(
                 "s1",
                 project / "src",
@@ -117,10 +122,33 @@ class VaultPrivacyCanaryTests(unittest.TestCase):
             claude("s4", project / "src", "SessionStart", source="startup")
 
             delivered = first["hookSpecificOutput"]["additionalContext"]
-            for canary in ("canarybody7731", "canarytitle7731", "canaryvault7731"):
+            for canary in (
+                "canaryid7731",
+                "canarytitle7731",
+                "canaryhook7731",
+                "canaryvault7731",
+                "canarybody7731",
+            ):
                 self.assertIn(canary, delivered)
             self.assertIn(
                 "canarytie7731-a", tied["hookSpecificOutput"]["additionalContext"]
+            )
+            with closing(sqlite3.connect(store.paths.database)) as conn:
+                receipts = conn.execute(
+                    "SELECT session_id, cause, disposition, reason_code "
+                    "FROM vault_receipts ORDER BY id"
+                ).fetchall()
+            self.assertEqual(
+                receipts,
+                [
+                    ("s1", "new", "delivered", None),
+                    ("s1", "request", "delivered", None),
+                    ("s1", "resume", "skipped", "unchanged"),
+                    ("s1", "compact", "delivered", None),
+                    ("s2", "new", "delivered", "ambiguous"),
+                    ("s3", "deferred", "deferred", None),
+                    ("s4", "new", "degraded", "parse_error"),
+                ],
             )
 
             report = build_report(store, 30)

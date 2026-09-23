@@ -82,14 +82,21 @@ def register_tree(data_root: Path, path: Path) -> VaultTree:
     for other in kept.values():
         if other.root == tree.root:
             if stale:
-                _write(config, list(kept))
+                _save(config, list(kept))
             return tree
         if other.classification == tree.classification:
             raise VaultConfigError(
                 f"a {tree.classification} tree is already registered at {other.root}"
             )
-    _write(config, [*kept, str(tree.root)])
+    _save(config, [*kept, str(tree.root)])
     return tree
+
+
+def _save(config: Path, trees: list[str]) -> None:
+    try:
+        _write(config, trees)
+    except OSError as exc:
+        raise VaultConfigError(f"{config} could not be written: {exc}") from None
 
 
 def _resolve(entries: list[str]) -> tuple[dict[str, VaultTree], list[str]]:
