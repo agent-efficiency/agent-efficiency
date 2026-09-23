@@ -177,6 +177,8 @@ The SQLite schema stores:
 - host capability observations;
 - guidance selections and ratings;
 - verification receipts;
+- vault delivery receipts, a closed record of each vault delivery decision
+  (counts, two digests, and fixed codes, never vault text);
 - experiment enrollment and structured outcomes;
 - runtime samples.
 

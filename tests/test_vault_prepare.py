@@ -4,14 +4,16 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from agent_efficiency.vault.index import write_index
 from agent_efficiency.vault.prepare import EMPTY_DIGEST, TIME_BUDGET_NS, prepare
-from agent_efficiency.vault.render import ALLOWANCE, OMISSION_RESERVE
+from agent_efficiency.vault.render import ALLOWANCE, HEAD_CAP, OMISSION_RESERVE
 from vault_fixtures import (
+    git,
     make_repo,
     make_vault_tree,
     note_text,
-    recommit,
     register_trees,
 )
 
@@ -72,6 +74,31 @@ class PrepareTests(unittest.TestCase):
         other.mkdir()
         self.assertEqual(prepare(other, self.data).reason, "unmapped")
 
+    def test_unreadable_config_path_degrades(self) -> None:
+        config = self.data / "vault.json"
+        original = Path.is_file
+
+        def is_file(path: Path) -> bool:
+            if path == config:
+                raise PermissionError(13, "Permission denied", str(path))
+            return original(path)
+
+        with mock.patch.object(Path, "is_file", is_file):
+            result = prepare(self.project, self.data)
+        self.assertEqual((result.status, result.reason), ("degraded", "parse_error"))
+
+    def test_unresolvable_working_directory_degrades(self) -> None:
+        original = Path.resolve
+
+        def resolve(path: Path, strict: bool = False) -> Path:
+            if path == self.project:
+                raise RuntimeError("Symlink loop from the working directory")
+            return original(path, strict=strict)
+
+        with mock.patch.object(Path, "resolve", resolve):
+            result = prepare(self.project, self.data)
+        self.assertEqual((result.status, result.reason), ("degraded", "parse_error"))
+
     def test_corrupt_index_degrades(self) -> None:
         (self.private / "index.json").write_text("{", encoding="utf-8")
         result = prepare(self.project, self.data)
@@ -84,10 +111,23 @@ class PrepareTests(unittest.TestCase):
 
     def test_slow_selection_degrades_with_timeout(self) -> None:
         ticks = iter([0, TIME_BUDGET_NS + 1])
-        result = prepare(self.project, self.data, clock=lambda: next(ticks))
+        with mock.patch("agent_efficiency.vault.prepare.render") as render:
+            result = prepare(self.project, self.data, clock=lambda: next(ticks))
         self.assertEqual((result.status, result.reason), ("degraded", "timeout"))
+        render.assert_not_called()
 
-    def test_revision_follows_commits_and_digest_follows_text(self) -> None:
+    def test_commit_that_leaves_the_text_alone_changes_only_the_revision(
+        self,
+    ) -> None:
+        first = prepare(self.project, self.data)
+        (self.private / "NOTES.txt").write_text("outside the notes\n", encoding="utf-8")
+        git(self.private, "add", "NOTES.txt")
+        git(self.private, "commit", "-q", "-m", "unrelated")
+        second = prepare(self.project, self.data)
+        self.assertNotEqual(first.revision, second.revision)
+        self.assertEqual(first.digest, second.digest)
+
+    def test_uncommitted_edit_changes_only_the_digest(self) -> None:
         first = prepare(self.project, self.data)
         note = self.private / "projects" / "catalog.md"
         note.write_text(
@@ -96,11 +136,44 @@ class PrepareTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        recommit(self.private)
+        write_index(self.private)
         second = prepare(self.project, self.data)
-        self.assertNotEqual(first.revision, second.revision)
+        self.assertIn("Next: CLI slice.", second.rendered.text)
+        self.assertEqual(first.revision, second.revision)
         self.assertNotEqual(first.digest, second.digest)
         self.assertEqual(second.digest, prepare(self.project, self.data).digest)
+
+    def test_head_file_over_its_cap_reports_cap_exceeded(self) -> None:
+        body = "x" * (HEAD_CAP - 10)
+        tree = make_vault_tree(
+            self.base / "vault-full",
+            "private",
+            [note_text("catalog", repos=("example/catalog",), body=body)],
+        )
+        register_trees(self.data, self.core, tree)
+        result = prepare(self.project, self.data)
+        self.assertIn(body, result.rendered.text)
+        self.assertEqual(
+            (result.reason, result.rendered.truncated), ("cap_exceeded", False)
+        )
+
+    def test_nested_repository_with_unreadable_metadata_keeps_its_boundary(
+        self,
+    ) -> None:
+        outer = make_repo(self.base / "outer")
+        inner = outer / "inner"
+        inner.mkdir()
+        (inner / ".git").write_text(
+            f"gitdir: {self.base / 'missing-gitdir'}\n", encoding="utf-8"
+        )
+        tree = make_vault_tree(
+            self.base / "vault-outer",
+            "private",
+            [note_text("outer", paths=(str(outer),))],
+        )
+        register_trees(self.data, self.core, tree)
+        self.assertEqual(prepare(outer, self.data).selection.outcome, "matched")
+        self.assertEqual(prepare(inner, self.data).selection.outcome, "unmapped")
 
     def test_realistic_vault_prepares_well_inside_the_hook_budget(self) -> None:
         notes = [

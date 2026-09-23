@@ -6,6 +6,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from agent_efficiency.vault.config import (
     VaultConfigError,
@@ -30,6 +31,22 @@ class VaultConfigTests(unittest.TestCase):
 
     def test_missing_file_means_no_trees(self) -> None:
         self.assertEqual(load_trees(self.data), ())
+
+    def test_unreadable_config_path_is_a_config_error(self) -> None:
+        register_trees(self.data, self.core)
+        config = config_path(self.data)
+        original = Path.is_file
+
+        def is_file(path: Path) -> bool:
+            if path == config:
+                raise PermissionError(13, "Permission denied", str(path))
+            return original(path)
+
+        with mock.patch.object(Path, "is_file", is_file):
+            with self.assertRaises(VaultConfigError):
+                load_trees(self.data)
+            with self.assertRaises(VaultConfigError):
+                stale_entries(self.data)
 
     def test_register_writes_and_load_orders_by_classification(self) -> None:
         register_tree(self.data, self.private)

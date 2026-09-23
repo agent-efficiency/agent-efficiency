@@ -120,11 +120,12 @@ def _tree(path: Path) -> VaultTree:
 
 
 def _paths(config: Path) -> list[str]:
-    if not config.is_file():
-        return []
     try:
+        # On Python 3.11 to 3.13 ``is_file`` raises on a denied parent.
+        if not config.is_file():
+            return []
         data = json.loads(config.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError, RuntimeError) as exc:
         raise VaultConfigError(f"{config} could not be read: {exc}") from None
     schema = data.get("schema") if isinstance(data, dict) else None
     if isinstance(schema, bool) or schema != CONFIG_SCHEMA:

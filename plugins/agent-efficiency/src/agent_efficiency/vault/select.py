@@ -10,7 +10,11 @@ Order, first match wins:
    counts only when the note's ``repos`` also match the repository. An absolute
    entry above the nearest repository root never matches, so a parent is never
    inherited by a nested repository.
-2. With no path match, a ``repos`` match against the repository identity.
+2. With no path match, a ``repos`` match against the repository identity. A
+   note with any repository-relative ``paths`` entry is left out here: it
+   named where in the repository it applies, and that did not match. A note
+   with only absolute entries, or none, stays eligible, so a worktree or a
+   second clone still finds it.
 3. ``branches`` narrows an exact tie: a note naming the current branch wins,
    then a note naming no branch. A tie that remains is ``ambiguous``.
 """
@@ -90,8 +94,19 @@ def _entry_problem(entry: object) -> str | None:
 
 
 def select_project(
-    cwd: Path, repository: Repository | None, indexes: Mapping[str, dict]
+    cwd: Path,
+    repository: Repository | None,
+    indexes: Mapping[str, dict],
+    *,
+    boundary: Path | None = None,
 ) -> Selection:
+    """Select the project note for ``cwd``.
+
+    ``boundary`` is the root of a repository whose git metadata could not be
+    read. It stands in for the repository root, so an absolute entry above it
+    still never matches.
+    """
+
     where = cwd.expanduser().resolve()
     identity = repository.identity() if repository else ""
     candidates = [
@@ -103,11 +118,15 @@ def select_project(
 
     scored: list[tuple[int, str, dict]] = []
     for classification, entry in candidates:
-        depth = _path_depth(entry, where, repository, identity)
+        depth = _path_depth(entry, where, repository, identity, boundary)
         if depth is not None:
             scored.append((depth, classification, entry))
     if not scored and identity:
-        scored = [(0, c, e) for c, e in candidates if _repo_match(e, identity)]
+        scored = [
+            (0, c, e)
+            for c, e in candidates
+            if not _has_relative_path(e) and _repo_match(e, identity)
+        ]
     if not scored:
         return Selection("unmapped", None, None, _scope(None, indexes))
 
@@ -128,18 +147,23 @@ def select_project(
 
 
 def _path_depth(
-    entry: dict, where: Path, repository: Repository | None, identity: str
+    entry: dict,
+    where: Path,
+    repository: Repository | None,
+    identity: str,
+    boundary: Path | None,
 ) -> int | None:
+    nearest = repository.root if repository is not None else boundary
     best: int | None = None
     for raw in entry.get("paths", []):
-        if raw.startswith(("/", "~")):
+        if _is_absolute_entry(raw):
             try:
                 base = Path(raw).expanduser().resolve()
             except (RuntimeError, OSError, ValueError):
                 # An unknown user, a NUL byte, or a symlink loop: the entry
                 # names no directory, so it cannot match.
                 continue
-            if repository is not None and not _within(base, repository.root):
+            if nearest is not None and not _within(base, nearest):
                 continue
         else:
             if repository is None or not _repo_match(entry, identity):
@@ -149,6 +173,14 @@ def _path_depth(
             depth = len(base.parts)
             best = depth if best is None else max(best, depth)
     return best
+
+
+def _is_absolute_entry(raw: str) -> bool:
+    return raw.startswith(("/", "~"))
+
+
+def _has_relative_path(entry: dict) -> bool:
+    return any(not _is_absolute_entry(raw) for raw in entry.get("paths", []))
 
 
 def _within(path: Path, base: Path) -> bool:

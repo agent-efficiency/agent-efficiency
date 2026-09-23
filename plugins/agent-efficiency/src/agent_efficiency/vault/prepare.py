@@ -62,17 +62,20 @@ def prepare(
         indexes = {name: load_index(tree) for name, tree in by_name.items()}
     except SelectionError:
         return stopped("degraded", "parse_error")
+    boundary = None
     try:
         repository = find_repository(cwd)
-    except GitMetaError:
+    except GitMetaError as exc:
         repository = None
+        boundary = exc.root
     try:
-        selection = select_project(cwd, repository, indexes)
+        selection = select_project(cwd, repository, indexes, boundary=boundary)
         if clock() - started > TIME_BUDGET_NS:
             return stopped("degraded", "timeout")
         rendered = render(selection, by_name, indexes)
-    except (KeyError, TypeError):
-        # A hand-edited index can drop a field the generator always writes.
+    except (KeyError, TypeError, OSError, RuntimeError, ValueError):
+        # A hand-edited index can drop a field the generator always writes,
+        # and the working directory or a note path can fail to resolve.
         return stopped("degraded", "parse_error")
     if clock() - started > TIME_BUDGET_NS:
         return stopped("degraded", "timeout")
@@ -95,7 +98,7 @@ def _reason(selection: Selection, rendered: Rendered) -> str | None:
 
     if rendered.head_error:
         return "parse_error"
-    if rendered.truncated:
+    if rendered.over_cap:
         return "cap_exceeded"
     if rendered.omitted:
         return "over_budget"

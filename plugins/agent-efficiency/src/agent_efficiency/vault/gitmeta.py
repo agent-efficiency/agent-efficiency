@@ -35,7 +35,15 @@ _SHA = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 
 
 class GitMetaError(OSError):
-    """Raised when a git directory exists but its metadata cannot be read."""
+    """Raised when a git directory exists but its metadata cannot be read.
+
+    ``root`` is the directory holding the ``.git`` marker that could not be
+    read, or ``None`` when the failure came before any marker was found.
+    """
+
+    def __init__(self, message: str, root: Path | None = None) -> None:
+        super().__init__(message)
+        self.root = root
 
 
 @dataclass(frozen=True)
@@ -86,10 +94,13 @@ def _find(start: Path) -> Repository | None:
     current = start.expanduser().resolve()
     for candidate in (current, *current.parents):
         marker = candidate / ".git"
-        if marker.is_dir():
-            return _load(candidate, marker)
-        if marker.is_file():
-            return _load(candidate, _gitdir_from_file(candidate, marker))
+        is_dir = marker.is_dir()
+        if is_dir or marker.is_file():
+            try:
+                git_dir = marker if is_dir else _gitdir_from_file(candidate, marker)
+                return _load(candidate, git_dir)
+            except (OSError, ValueError, RuntimeError) as exc:
+                raise GitMetaError(str(exc), root=candidate) from None
     return None
 
 

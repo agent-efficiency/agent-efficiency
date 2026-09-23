@@ -160,6 +160,26 @@ class GitMetaTests(unittest.TestCase):
                     (("origin", "https://git.example.com/o/a"),),
                 )
 
+    def test_unreadable_marker_names_its_directory(self) -> None:
+        root = self.base / "broken"
+        root.mkdir()
+        (root / ".git").write_text(
+            f"gitdir: {self.base / 'missing'}\n", encoding="utf-8"
+        )
+        (root / "sub").mkdir()
+        with self.assertRaises(GitMetaError) as caught:
+            find_repository(root / "sub")
+        self.assertEqual(caught.exception.root, root)
+
+    def test_error_without_a_marker_has_no_root(self) -> None:
+        denied = PermissionError(13, "Permission denied")
+        with (
+            mock.patch.object(Path, "is_dir", side_effect=denied),
+            self.assertRaises(GitMetaError) as caught,
+        ):
+            find_repository(self.base / "plain")
+        self.assertIsNone(caught.exception.root)
+
     def test_git_file_with_a_nul_byte_is_reported(self) -> None:
         root = self.base / "nul"
         root.mkdir()

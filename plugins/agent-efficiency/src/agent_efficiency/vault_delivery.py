@@ -84,11 +84,17 @@ def deliver_vault_context(
 
     try:
         prepared = prepare(cwd, store.paths.root)
-    except (OSError, ValueError, KeyError, TypeError):
+    except Exception:  # noqa: BLE001
+        # Vault context is optional and must never stop a session. The
+        # specific error types are already classified inside prepare.
         prepared = stopped("degraded", "parse_error")
     adapter = adapter_for(host)
     can_add = "add_context" in adapter.capabilities.get(event, ())
 
+    if prepared.status == "unavailable" and prepared.reason == "no_trees":
+        # No registered tree means the feature is not in use, so there is
+        # nothing to record.
+        return Delivery(None, "unavailable", "no_trees")
     if prepared.status == "unavailable":
         return _finish(store, session_id, cause, prepared, "unavailable")
     if prepared.status == "degraded":

@@ -25,6 +25,7 @@ ALLOWANCE = 9000
 # Held back once anything must be dropped, so the omission line always fits.
 OMISSION_RESERVE = 160
 HEAD_CAP = CAPS["project"]
+TITLE_CAP = 100
 LINE_TYPES = ("feedback", "doctrine", "reference")
 
 HEADER = (
@@ -33,6 +34,7 @@ HEADER = (
     "its .md ending. Open the file when its line applies to the task."
 )
 UNMAPPED = "No vault project matches this directory, so only core notes are listed."
+CUT_NOTICE = "Vault context was cut to fit its allowance."
 HEAD_UNREADABLE = (
     "The project note for this directory could not be loaded. "
     "Run agent-efficiency vault check on its tree."
@@ -52,6 +54,7 @@ class Rendered:
     omitted: tuple[tuple[str, int], ...]
     truncated: bool
     head_error: bool
+    over_cap: bool
 
 
 ReadBody = Callable[[VaultTree, dict], str]
@@ -60,8 +63,11 @@ ReadBody = Callable[[VaultTree, dict], str]
 def read_body(tree: VaultTree, entry: dict) -> str:
     """Load one note and return its body. The caller rechecks the cap."""
 
-    root = tree.root.resolve()
-    path = (root / str(entry["path"])).resolve()
+    try:
+        root = tree.root.resolve()
+        path = (root / str(entry["path"])).resolve()
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise RenderError(f"{entry['path']} could not be resolved: {exc}") from None
     if root not in path.parents:
         raise RenderError(f"{entry['path']} is outside its tree")
     try:
@@ -83,6 +89,7 @@ def render(
     truncated = False
     head_error = False
     head_loaded = False
+    over_cap = False
     matched: tuple[str, str] | None = None
 
     if selection.outcome == "matched" and selection.entry and selection.classification:
@@ -96,18 +103,22 @@ def render(
             lead.append(HEAD_UNREADABLE)
         else:
             head_loaded = True
+            # The cap is on the whole file, so a body that fits can still
+            # belong to a note that is over its cap.
+            over_cap = entry.get("within_cap") is False or len(body) > HEAD_CAP
             if len(body) > HEAD_CAP:
                 body = _cut(body, HEAD_CAP)
                 truncated = True
             head_chars = len(body)
             lead.append(
-                f"## Project: {entry['title']}\n"
+                f"## Project: {str(entry['title'])[:TITLE_CAP]}\n"
                 f"File: {tree.root / str(entry['path'])}\n{body}"
             )
-            if truncated:
+            if over_cap:
                 lead.append(
-                    f"The project note is over its {HEAD_CAP} character cap, so "
-                    "the rest is not shown. Move its history into the archive."
+                    f"The project note is over its {HEAD_CAP} character cap"
+                    + (", so the rest is not shown" if truncated else "")
+                    + ". Move its history into the archive."
                 )
     elif selection.outcome == "ambiguous":
         lead.append(
@@ -153,14 +164,21 @@ def render(
         parts.append(
             f"Omitted for space: {counts}. Each tree's INDEX.md lists every note."
         )
+    text = "\n\n".join(parts)
+    if len(text) > allowance:
+        # The lead is not budgeted line by line, so a very long tie list or
+        # head can still overflow. Cut it at a line and say so.
+        text = _fit(text, allowance)
+        truncated = True
     return Rendered(
-        text="\n\n".join(parts),
+        text=text,
         notes_selected=selected,
         head_chars=head_chars,
         chars_omitted=chars_omitted,
         omitted=tuple(sorted(omitted.items())),
         truncated=truncated,
         head_error=head_error,
+        over_cap=over_cap,
     )
 
 
@@ -204,6 +222,14 @@ def _line(entry: dict) -> str:
     path = str(entry["path"])
     stem = path.removesuffix(".md")
     return f"- {stem}: {entry['hook']}"
+
+
+def _fit(text: str, allowance: int) -> str:
+    """Cut ``text`` at a line so it and the cut notice fit the allowance."""
+
+    limit = allowance - len(CUT_NOTICE) - 2
+    kept = text[: max(text.rfind("\n", 0, limit + 1), 0)].rstrip()
+    return f"{kept}\n\n{CUT_NOTICE}" if kept else CUT_NOTICE
 
 
 def _cut(body: str, limit: int) -> str:

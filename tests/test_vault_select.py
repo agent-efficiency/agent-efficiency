@@ -105,6 +105,19 @@ class SelectProjectTests(unittest.TestCase):
         idx = indexes(private=[entry("catalog", repos=("example/catalog",))])
         self.assertEqual(self.select(repo, idx).entry["id"], "catalog")
 
+    def test_subdirectory_note_is_not_loaded_elsewhere_in_its_repository(
+        self,
+    ) -> None:
+        repo = make_repo(
+            self.base / "mono", remotes={"origin": "git@git.example.com:o/mono.git"}
+        )
+        for sub in ("web", "docs", "svc/x"):
+            (repo / sub).mkdir(parents=True)
+        idx = indexes(work=[entry("svc", repos=("o/mono",), paths=("svc",))])
+        self.assertEqual(self.select(repo / "web", idx).outcome, "unmapped")
+        self.assertEqual(self.select(repo / "docs", idx).outcome, "unmapped")
+        self.assertEqual(self.select(repo / "svc" / "x", idx).entry["id"], "svc")
+
     def test_path_match_beats_remote_match(self) -> None:
         repo = make_repo(
             self.base / "app", remotes={"origin": "https://git.example.com/o/app.git"}
@@ -132,6 +145,16 @@ class SelectProjectTests(unittest.TestCase):
         idx = indexes(private=[entry("outer", paths=(str(outer),))])
         self.assertEqual(self.select(inner, idx).outcome, "unmapped")
         self.assertEqual(self.select(outer, idx).entry["id"], "outer")
+
+    def test_boundary_stands_in_for_an_unreadable_repository(self) -> None:
+        outer = make_repo(self.base / "outer")
+        inner = outer / "inner"
+        inner.mkdir()
+        idx = indexes(private=[entry("outer", paths=(str(outer),))])
+        self.assertEqual(
+            select_project(inner, None, idx, boundary=inner).outcome, "unmapped"
+        )
+        self.assertEqual(select_project(inner, None, idx).entry["id"], "outer")
 
     def test_exact_tie_is_ambiguous_and_names_the_ids(self) -> None:
         repo = make_repo(self.base / "app")

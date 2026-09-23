@@ -25,7 +25,6 @@ from agent_efficiency.verification.receipts import receipt_state
 from agent_efficiency.verification.state import workspace_state
 from agent_efficiency.policy import PolicyPack, classify_task, classify_tool
 from agent_efficiency.store import Store, project_identity
-from agent_efficiency.vault_delivery import deliver_vault_context, session_cause
 
 
 CONTROL_RE = re.compile(
@@ -203,6 +202,14 @@ def _run_hook(
         except (OSError, ValueError, sqlite3.Error):
             # Measurement is optional and cannot make startup fail.
             pass
+        # The vault modules are only needed at session start, on an explicit
+        # request, and for a Cursor deferral. Importing them on every hook
+        # event costs about 25 ms, so they load where they are used.
+        from agent_efficiency.vault_delivery import (
+            deliver_vault_context,
+            session_cause,
+        )
+
         lead = (
             CURSOR_SESSION_CONTEXT
             if host == "cursor" and mode in {"advise", "guard"}

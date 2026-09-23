@@ -3,8 +3,11 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from agent_efficiency.vault.render import (
+    ALLOWANCE,
+    CUT_NOTICE,
     HEAD_CAP,
     HEAD_UNREADABLE,
     HEADER,
@@ -123,7 +126,7 @@ class RenderTests(unittest.TestCase):
             {"core": {"notes": []}, "work": {"notes": [head]}},
             read=reader({"big": body}),
         )
-        self.assertTrue(out.truncated)
+        self.assertEqual((out.truncated, out.over_cap), (True, True))
         self.assertLessEqual(out.head_chars, HEAD_CAP)
         self.assertIn(f"over its {HEAD_CAP} character cap", out.text)
 
@@ -137,6 +140,20 @@ class RenderTests(unittest.TestCase):
         )
         self.assertEqual((out.notes_selected, out.head_chars), (1, 0))
         self.assertIn("## Project: fresh title", out.text)
+
+    def test_head_whose_file_is_over_cap_is_flagged_but_not_cut(self) -> None:
+        head = {**entry("full", "project"), "within_cap": False}
+        body = "x" * (HEAD_CAP - 10)
+        out = render(
+            matched("work", head),
+            TREES,
+            {"core": {"notes": []}, "work": {"notes": [head]}},
+            read=reader({"full": body}),
+        )
+        self.assertEqual((out.over_cap, out.truncated), (True, False))
+        self.assertEqual(out.head_chars, len(body))
+        self.assertIn(body, out.text)
+        self.assertIn(f"over its {HEAD_CAP} character cap", out.text)
 
     def test_unreadable_head_is_reported_and_core_still_renders(self) -> None:
         head = entry("gone", "project")
@@ -155,6 +172,25 @@ class RenderTests(unittest.TestCase):
         selection = Selection("ambiguous", None, None, ("core",), ("a", "b"))
         out = render(selection, TREES, {"core": {"notes": []}})
         self.assertIn("(a, b)", out.text)
+
+    def test_long_title_is_cut_and_the_allowance_holds(self) -> None:
+        head = {**entry("long", "project"), "title": "t" * 6500}
+        out = render(
+            matched("work", head),
+            TREES,
+            {"core": {"notes": []}, "work": {"notes": [head]}},
+            read=reader({"long": "b" * 2950}),
+        )
+        self.assertLessEqual(len(out.text), ALLOWANCE)
+        self.assertIn("## Project: " + "t" * 100 + "\n", out.text)
+
+    def test_long_ambiguous_tie_is_cut_to_the_allowance(self) -> None:
+        tied = tuple(f"project-{n:03d}" for n in range(200))
+        selection = Selection("ambiguous", None, None, ("core",), tied)
+        out = render(selection, TREES, {"core": {"notes": []}}, allowance=1000)
+        self.assertLessEqual(len(out.text), 1000)
+        self.assertTrue(out.text.endswith(CUT_NOTICE))
+        self.assertTrue(out.truncated)
 
     def test_rendering_is_deterministic(self) -> None:
         idx = {"core": {"notes": [entry(f"r{n}") for n in range(30)]}}
@@ -189,6 +225,27 @@ class ReadBodyTests(unittest.TestCase):
     def test_missing_file_is_a_render_error(self) -> None:
         with self.assertRaises(RenderError):
             read_body(self.tree, {"path": "projects/none.md"})
+
+    def test_symlink_loop_head_is_a_head_error(self) -> None:
+        loop = self.tree.root / "projects" / "loop.md"
+        loop.symlink_to(loop)
+        real_resolve = Path.resolve
+
+        def resolve(path: Path, strict: bool = False) -> Path:
+            # Python 3.13 and later resolve a loop without raising.
+            if path.name == "loop.md":
+                raise RuntimeError(f"Symlink loop from {path}")
+            return real_resolve(path, strict)
+
+        head = {**entry("loop", "project"), "path": "projects/loop.md"}
+        with mock.patch.object(Path, "resolve", resolve):
+            out = render(
+                matched("work", head),
+                {**TREES, "work": self.tree},
+                {"core": {"notes": []}, "work": {"notes": [head]}},
+            )
+        self.assertTrue(out.head_error)
+        self.assertIn(HEAD_UNREADABLE, out.text)
 
 
 if __name__ == "__main__":
