@@ -127,6 +127,17 @@ class RenderTests(unittest.TestCase):
         self.assertLessEqual(out.head_chars, HEAD_CAP)
         self.assertIn(f"over its {HEAD_CAP} character cap", out.text)
 
+    def test_matched_head_with_an_empty_body_is_selected(self) -> None:
+        head = entry("fresh", "project")
+        out = render(
+            matched("work", head),
+            TREES,
+            {"core": {"notes": []}, "work": {"notes": [head]}},
+            read=reader({"fresh": ""}),
+        )
+        self.assertEqual((out.notes_selected, out.head_chars), (1, 0))
+        self.assertIn("## Project: fresh title", out.text)
+
     def test_unreadable_head_is_reported_and_core_still_renders(self) -> None:
         head = entry("gone", "project")
         out = render(

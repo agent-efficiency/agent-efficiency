@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import unittest
@@ -182,6 +183,33 @@ class SelectProjectTests(unittest.TestCase):
             idx = indexes(private=[entry("proj", paths=("~/proj",))])
             self.assertEqual(self.select(work, idx).entry["id"], "proj")
 
+    def test_path_that_cannot_be_expanded_is_skipped(self) -> None:
+        work = self.base / "proj"
+        work.mkdir()
+        for bad in ("~nosuchuser7731/app", str(self.base / "a\x00b")):
+            with self.subTest(bad=bad):
+                idx = indexes(private=[entry("proj", paths=(bad, str(work)))])
+                self.assertEqual(self.select(work, idx).entry["id"], "proj")
+
+    def test_symlink_loop_path_is_skipped(self) -> None:
+        work = self.base / "proj"
+        work.mkdir()
+        loop = self.base / "loop"
+        loop.symlink_to(loop)
+        real_resolve = Path.resolve
+
+        def resolve(path: Path, strict: bool = False) -> Path:
+            # Python 3.13 and later resolve a loop without raising.
+            if "loop" in path.parts:
+                raise RuntimeError(f"Symlink loop from {path}")
+            return real_resolve(path, strict)
+
+        idx = indexes(private=[entry("proj", paths=(str(loop / "app"), str(work)))])
+        repository = find_repository(work)
+        with mock.patch.object(Path, "resolve", resolve):
+            result = select_project(work, repository, idx)
+        self.assertEqual(result.entry["id"], "proj")
+
 
 class LoadIndexTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -207,6 +235,37 @@ class LoadIndexTests(unittest.TestCase):
         (self.root / "index.json").write_text(
             '{"schema": 1, "classification": "work", "notes": []}', encoding="utf-8"
         )
+        with self.assertRaises(SelectionError):
+            load_index(find_tree(self.root))
+
+    def write_notes(self, notes: list) -> None:
+        (self.root / "index.json").write_text(
+            json.dumps({"schema": 1, "classification": "core", "notes": notes}),
+            encoding="utf-8",
+        )
+
+    def test_note_that_is_not_an_object_is_an_error(self) -> None:
+        self.write_notes([entry("ok"), "not a note"])
+        with self.assertRaisesRegex(SelectionError, "entry 2"):
+            load_index(find_tree(self.root))
+
+    def test_paths_item_that_is_not_a_string_is_an_error(self) -> None:
+        bad = entry("bad")
+        bad["paths"] = ["/ok", 7]
+        self.write_notes([bad])
+        with self.assertRaisesRegex(SelectionError, "entry 1"):
+            load_index(find_tree(self.root))
+
+    def test_string_field_of_the_wrong_type_is_an_error(self) -> None:
+        for field in ("id", "title", "type", "status", "hook", "path"):
+            bad = entry("bad")
+            bad[field] = ["x"]
+            self.write_notes([bad])
+            with self.subTest(field=field), self.assertRaises(SelectionError):
+                load_index(find_tree(self.root))
+
+    def test_deeply_nested_index_is_an_error(self) -> None:
+        (self.root / "index.json").write_text("[" * 200000, encoding="utf-8")
         with self.assertRaises(SelectionError):
             load_index(find_tree(self.root))
 

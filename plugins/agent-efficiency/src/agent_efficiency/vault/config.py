@@ -13,7 +13,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from agent_efficiency.vault.root import VaultRootError, VaultTree, find_tree
+from agent_efficiency.vault.root import VaultTree, find_tree
 from agent_efficiency.vault.schema import CLASSIFICATIONS
 
 CONFIG_NAME = "vault.json"
@@ -29,45 +29,87 @@ def config_path(data_root: Path) -> Path:
 
 
 def load_trees(data_root: Path) -> tuple[VaultTree, ...]:
-    """Return the registered trees in classification order. No file means none."""
+    """Return the registered trees in classification order. No file means none.
 
-    trees = [_tree(Path(raw)) for raw in _paths(config_path(data_root))]
+    One entry that does not resolve to a tree fails the whole list, so a
+    broken configuration is reported rather than silently narrowed.
+    """
+
+    config = config_path(data_root)
+    trees: list[VaultTree] = []
     seen: dict[str, Path] = {}
-    for tree in trees:
+    for position, raw in enumerate(_paths(config), start=1):
+        try:
+            tree = _tree(Path(raw))
+        except VaultConfigError as exc:
+            raise VaultConfigError(
+                f"vault tree entry {position}: {str(exc).rstrip('.')}. "
+                f"Fix or remove the entry in {config}."
+            ) from None
         if tree.classification in seen:
             raise VaultConfigError(
                 f"two registered trees are classified {tree.classification!r}: "
-                f"{seen[tree.classification]} and {tree.root}"
+                f"{seen[tree.classification]} and {tree.root}. "
+                f"Fix or remove the entry in {config}."
             )
         seen[tree.classification] = tree.root
+        trees.append(tree)
     return tuple(
         sorted(trees, key=lambda tree: CLASSIFICATIONS.index(tree.classification))
     )
 
 
+def stale_entries(data_root: Path) -> list[str]:
+    """Return the entries that no longer resolve to a vault tree root.
+
+    These are the entries ``register_tree`` drops.
+    """
+
+    return _resolve(_paths(config_path(data_root)))[1]
+
+
 def register_tree(data_root: Path, path: Path) -> VaultTree:
-    """Add a tree root to the list. Registering the same root again is a no-op."""
+    """Add a tree root to the list. Registering the same root again is a no-op.
+
+    Entries that no longer resolve to a tree, such as a tree that was moved or
+    deleted, are dropped from the list so they cannot block the new one.
+    """
 
     tree = _tree(path)
     config = config_path(data_root)
     current = _paths(config)
-    for raw in current:
-        other = _tree(Path(raw))
+    kept, stale = _resolve(current)
+    for other in kept.values():
         if other.root == tree.root:
+            if stale:
+                _write(config, list(kept))
             return tree
         if other.classification == tree.classification:
             raise VaultConfigError(
                 f"a {tree.classification} tree is already registered at {other.root}"
             )
-    _write(config, [*current, str(tree.root)])
+    _write(config, [*kept, str(tree.root)])
     return tree
 
 
+def _resolve(entries: list[str]) -> tuple[dict[str, VaultTree], list[str]]:
+    """Split entries into those that resolve to a tree and those that do not."""
+
+    kept: dict[str, VaultTree] = {}
+    stale: list[str] = []
+    for raw in entries:
+        try:
+            kept[raw] = _tree(Path(raw))
+        except VaultConfigError:
+            stale.append(raw)
+    return kept, stale
+
+
 def _tree(path: Path) -> VaultTree:
-    resolved = path.expanduser().resolve()
     try:
+        resolved = path.expanduser().resolve()
         tree = find_tree(resolved)
-    except VaultRootError as exc:
+    except (OSError, ValueError, RuntimeError) as exc:
         raise VaultConfigError(str(exc)) from None
     if tree.root != resolved:
         raise VaultConfigError(
@@ -92,6 +134,16 @@ def _paths(config: Path) -> list[str]:
     trees = data.get("trees")
     if not isinstance(trees, list) or not all(isinstance(item, str) for item in trees):
         raise VaultConfigError(f"{config} trees must be a list of paths")
+    for position, raw in enumerate(trees, start=1):
+        try:
+            absolute = bool(raw) and Path(raw).expanduser().is_absolute()
+        except RuntimeError:
+            absolute = False
+        if not absolute:
+            raise VaultConfigError(
+                f"vault tree entry {position} must be an absolute path. "
+                f"Fix or remove the entry in {config}."
+            )
     return trees
 
 

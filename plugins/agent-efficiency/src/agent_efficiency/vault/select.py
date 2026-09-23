@@ -26,6 +26,9 @@ from agent_efficiency.vault.gitmeta import Repository
 from agent_efficiency.vault.index import INDEX_JSON, INDEX_SCHEMA
 from agent_efficiency.vault.root import VaultRootError, VaultTree, normalize_remote
 
+STRING_FIELDS = ("id", "title", "type", "status", "hook", "path")
+LIST_FIELDS = ("repos", "paths", "branches")
+
 
 class SelectionError(ValueError):
     """Raised when a registered tree's index cannot be used."""
@@ -44,7 +47,7 @@ def load_index(tree: VaultTree) -> dict:
     path = tree.root / INDEX_JSON
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
         raise SelectionError(f"{path} could not be read: {exc}") from None
     schema = data.get("schema") if isinstance(data, dict) else None
     if (
@@ -58,7 +61,32 @@ def load_index(tree: VaultTree) -> dict:
             f"{path} belongs to a {data.get('classification')!r} tree, "
             f"not {tree.classification!r}"
         )
+    for position, entry in enumerate(data["notes"], start=1):
+        problem = _entry_problem(entry)
+        if problem:
+            raise SelectionError(f"{path} note entry {position} {problem}")
     return data
+
+
+def _entry_problem(entry: object) -> str | None:
+    """Describe why an index entry has the wrong shape, or return ``None``.
+
+    The index is the trust boundary: once it loads, selection and rendering
+    rely on these fields having these types.
+    """
+
+    if not isinstance(entry, dict):
+        return "is not an object"
+    for field in STRING_FIELDS:
+        if not isinstance(entry.get(field), str):
+            return f"field {field!r} must be a string"
+    for field in LIST_FIELDS:
+        value = entry.get(field)
+        if not isinstance(value, list) or not all(
+            isinstance(item, str) for item in value
+        ):
+            return f"field {field!r} must be a list of strings"
+    return None
 
 
 def select_project(
@@ -105,7 +133,12 @@ def _path_depth(
     best: int | None = None
     for raw in entry.get("paths", []):
         if raw.startswith(("/", "~")):
-            base = Path(raw).expanduser().resolve()
+            try:
+                base = Path(raw).expanduser().resolve()
+            except (RuntimeError, OSError, ValueError):
+                # An unknown user, a NUL byte, or a symlink loop: the entry
+                # names no directory, so it cannot match.
+                continue
             if repository is not None and not _within(base, repository.root):
                 continue
         else:

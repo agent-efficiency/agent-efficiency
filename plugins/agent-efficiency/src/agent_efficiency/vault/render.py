@@ -82,6 +82,7 @@ def render(
     head_chars = 0
     truncated = False
     head_error = False
+    head_loaded = False
     matched: tuple[str, str] | None = None
 
     if selection.outcome == "matched" and selection.entry and selection.classification:
@@ -94,6 +95,7 @@ def render(
             head_error = True
             lead.append(HEAD_UNREADABLE)
         else:
+            head_loaded = True
             if len(body) > HEAD_CAP:
                 body = _cut(body, HEAD_CAP)
                 truncated = True
@@ -126,7 +128,7 @@ def render(
     budget = allowance if used + needed <= allowance else allowance - OMISSION_RESERVE
 
     parts = [first]
-    selected = 1 if head_chars else 0
+    selected = 1 if head_loaded else 0
     omitted: Counter[str] = Counter()
     chars_omitted = 0
     stopped = False

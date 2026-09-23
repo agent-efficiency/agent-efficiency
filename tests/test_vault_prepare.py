@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from agent_efficiency.vault.prepare import EMPTY_DIGEST, TIME_BUDGET_NS, prepare
+from agent_efficiency.vault.render import ALLOWANCE, OMISSION_RESERVE
 from vault_fixtures import (
     make_repo,
     make_vault_tree,
@@ -111,11 +112,29 @@ class PrepareTests(unittest.TestCase):
             )
             for n in range(580)
         ]
+        notes.append(
+            note_text(
+                "catalog-work",
+                classification="work",
+                repos=("example/catalog",),
+                body="Next: API slice.",
+            )
+        )
         work = make_vault_tree(self.base / "vault-work", "work", notes, commit=False)
-        register_trees(self.data, self.core, work, self.private)
+        register_trees(self.data, self.core, work)
         started = time.perf_counter()
-        prepare(self.project, self.data)
-        self.assertLess(time.perf_counter() - started, 0.5)
+        result = prepare(self.project, self.data)
+        elapsed = time.perf_counter() - started
+        self.assertLess(elapsed, 0.5)
+        self.assertEqual(
+            (result.selection.classification, result.selection.entry["id"]),
+            ("work", "catalog-work"),
+        )
+        text = result.rendered.text
+        self.assertLessEqual(len(text), ALLOWANCE)
+        self.assertGreater(len(text), ALLOWANCE - 2 * OMISSION_RESERVE)
+        self.assertIn("Omitted for space:", text)
+        self.assertEqual(result.reason, "over_budget")
 
 
 if __name__ == "__main__":

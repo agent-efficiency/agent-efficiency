@@ -11,6 +11,11 @@ every worktree of one repository resolves the same way.
 
 Repositories that use the reftable ref format are reported as unreadable,
 and the caller falls back to matching by path.
+
+Remote URLs are read as written in the config. ``url.<base>.insteadOf``
+rewrites are not applied, so a remote written in a rewritten short form may
+not normalize to a known repository, and that repository then matches by
+path only.
 """
 
 from __future__ import annotations
@@ -21,8 +26,11 @@ from pathlib import Path
 
 from agent_efficiency.vault.root import VaultRootError, normalize_remote
 
-_REMOTE_SECTION = re.compile(r'^\[\s*remote\s+"([^"]+)"\s*\]$')
-_URL = re.compile(r"^url\s*=\s*(.+)$")
+# The section keyword and the key are case-insensitive in git; the remote
+# name is not.
+_REMOTE_SECTION = re.compile(r'^\[\s*(?i:remote)\s+"([^"]+)"\s*\]$')
+_URL = re.compile(r"^url\s*=\s*(.+)$", re.IGNORECASE)
+_COMMENT = re.compile(r"\s[;#].*$")
 _SHA = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 
 
@@ -60,8 +68,21 @@ class Repository:
 
 
 def find_repository(start: Path) -> Repository | None:
-    """Return the nearest repository at or above ``start``, or ``None``."""
+    """Return the nearest repository at or above ``start``, or ``None``.
 
+    Every failure to read what is there is raised as ``GitMetaError``, so the
+    caller handles one error type.
+    """
+
+    try:
+        return _find(start)
+    except GitMetaError:
+        raise
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise GitMetaError(str(exc)) from None
+
+
+def _find(start: Path) -> Repository | None:
     current = start.expanduser().resolve()
     for candidate in (current, *current.parents):
         marker = candidate / ".git"
@@ -147,8 +168,18 @@ def _remotes(config: Path) -> tuple[tuple[str, str], ...]:
         if current is not None and current not in found:
             match = _URL.match(line)
             if match:
-                found[current] = match.group(1).strip()
+                found[current] = _config_value(match.group(1))
     return tuple(sorted(found.items()))
+
+
+def _config_value(raw: str) -> str:
+    """Return a config value without its quotes or a trailing comment."""
+
+    value = raw.strip()
+    if value.startswith('"'):
+        end = value.find('"', 1)
+        return value[1:end] if end > 0 else value
+    return _COMMENT.sub("", value).strip()
 
 
 def _read(path: Path) -> str:
