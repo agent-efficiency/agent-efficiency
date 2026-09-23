@@ -23,7 +23,13 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
+from agent_efficiency.paths import data_dir
 from agent_efficiency.vault import gitcontent
+from agent_efficiency.vault.config import (
+    VaultConfigError,
+    register_tree,
+    stale_entries,
+)
 from agent_efficiency.vault.gitcontent import GitError
 from agent_efficiency.vault.guards import (
     Finding,
@@ -36,6 +42,8 @@ from agent_efficiency.vault.guards import (
 )
 from agent_efficiency.vault.index import IndexError_, cap_overflow, write_index
 from agent_efficiency.vault.migrate import MigrationError, apply_proposal, propose
+from agent_efficiency.vault.prepare import prepare
+from agent_efficiency.vault.render import ALLOWANCE
 from agent_efficiency.vault.root import (
     MARKER,
     MARKER_SCHEMA,
@@ -55,6 +63,7 @@ VAULT_ERRORS = (
     GitError,
     IndexError_,
     MigrationError,
+    VaultConfigError,
     VaultRootError,
     WalkError,
 )
@@ -167,6 +176,18 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         help="Replace notes that are already in a tree.",
     )
 
+    registering = vault_sub.add_parser(
+        "register",
+        help="Register a vault tree so sessions can load it.",
+    )
+    registering.add_argument("root")
+
+    showing = vault_sub.add_parser(
+        "show",
+        help="Print the vault context a session would receive in a directory.",
+    )
+    showing.add_argument("--cwd", default=None)
+
 
 def dispatch(args: argparse.Namespace) -> int:
     handler = {
@@ -174,6 +195,8 @@ def dispatch(args: argparse.Namespace) -> int:
         "index": _index,
         "check": _check,
         "migrate": _migrate,
+        "register": _register,
+        "show": _show,
     }.get(args.vault_command)
     if handler is None:
         return _fail(f"unknown vault command {args.vault_command!r}")
@@ -508,6 +531,38 @@ def _permissions(bits: int) -> int:
     mask = os.umask(0o022)
     os.umask(mask)
     return bits & ~mask
+
+
+def _register(args: argparse.Namespace) -> int:
+    root = data_dir(args.data_dir)
+    try:
+        stale = stale_entries(root)
+        tree = register_tree(root, Path(args.root))
+    except VaultConfigError as exc:
+        return _fail(str(exc))
+    for entry in stale:
+        print(f"Dropped a registered tree that no longer exists: {entry}")
+    print(f"Registered the {tree.classification} tree at {tree.root}.")
+    return 0
+
+
+def _show(args: argparse.Namespace) -> int:
+    cwd = Path(args.cwd or os.getcwd())
+    prepared = prepare(cwd, data_dir(args.data_dir))
+    if prepared.status != "ready":
+        print(f"No vault context: {prepared.status} ({prepared.reason}).")
+        return 0 if prepared.status == "unavailable" else 2
+    rendered = prepared.rendered
+    omitted = sum(count for _, count in rendered.omitted)
+    print(rendered.text)
+    print()
+    print(
+        f"Summary: {prepared.selection.outcome} | "
+        f"{len(rendered.text)} of {ALLOWANCE} characters | "
+        f"head {rendered.head_chars} | notes {rendered.notes_selected} | "
+        f"omitted {omitted} | reason {prepared.reason or 'none'}"
+    )
+    return 0
 
 
 def _fail(message: str, *, as_json: bool = False) -> int:

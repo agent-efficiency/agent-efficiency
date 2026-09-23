@@ -12,6 +12,7 @@ from unittest import mock
 
 from agent_efficiency.cli import main
 from agent_efficiency.vault import index as index_module
+from vault_fixtures import make_repo, make_vault_tree, note_text
 
 DIRECTORY_NAMES = ("projects", "feedback", "reference", "doctrine", "sessions")
 
@@ -781,6 +782,90 @@ class VaultMigrateTests(unittest.TestCase):
         ):
             main(["vault", "migrate"])
         self.assertEqual(caught.exception.code, 2)
+
+
+class VaultRegisterAndShowTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name).resolve()
+        self.data = self.base / "data"
+        self.project = make_repo(
+            self.base / "catalog",
+            remotes={"origin": "https://git.example.com/example/catalog.git"},
+        )
+        self.core = make_vault_tree(
+            self.base / "vault-core",
+            "core",
+            [note_text("writing", note_type="feedback", classification="core")],
+        )
+        self.private = make_vault_tree(
+            self.base / "vault-private",
+            "private",
+            [note_text("catalog", repos=("example/catalog",), body="Next: API slice.")],
+        )
+
+    def cli(self, *args: str) -> list[str]:
+        return ["--data-dir", str(self.data), "vault", *args]
+
+    def test_register_then_show_prints_the_session_context(self) -> None:
+        for tree in (self.core, self.private):
+            code, out = run(self.cli("register", str(tree)))
+            self.assertEqual(code, 0)
+            self.assertIn("Registered the", out)
+        code, out = run(self.cli("show", "--cwd", str(self.project)))
+        self.assertEqual(code, 0)
+        self.assertIn("Next: API slice.", out)
+        self.assertIn("Summary: matched |", out)
+
+    def test_register_reports_a_stale_entry_it_drops(self) -> None:
+        run(self.cli("register", str(self.core)))
+        moved = self.base / "moved-core"
+        self.core.rename(moved)
+        code, out = run(self.cli("register", str(self.private)))
+        self.assertEqual(code, 0)
+        self.assertIn("Dropped a registered tree that no longer exists", out)
+
+    def test_register_refuses_a_directory_that_is_not_a_tree(self) -> None:
+        code, _, err = run_both(self.cli("register", str(self.base)))
+        self.assertEqual(code, 2)
+        self.assertIn(".vault.json", err)
+
+    def test_show_without_trees_says_so(self) -> None:
+        code, out = run(self.cli("show", "--cwd", str(self.project)))
+        self.assertEqual(code, 0)
+        self.assertIn("No vault context: unavailable (no_trees)", out)
+
+    def test_show_reports_an_unreadable_config_path(self) -> None:
+        run(self.cli("register", str(self.core)))
+        config = self.data / "vault.json"
+        original = Path.is_file
+
+        def is_file(path: Path) -> bool:
+            if path == config:
+                raise PermissionError(13, "Permission denied", str(path))
+            return original(path)
+
+        with mock.patch.object(Path, "is_file", is_file):
+            code, out, err = run_both(self.cli("show", "--cwd", str(self.project)))
+        self.assertEqual(code, 2)
+        self.assertIn("No vault context: degraded (parse_error)", out)
+        self.assertNotIn("Traceback", out + err)
+
+    def test_show_reports_an_unresolvable_working_directory(self) -> None:
+        run(self.cli("register", str(self.core)))
+        original = Path.resolve
+
+        def resolve(path: Path, strict: bool = False) -> Path:
+            if path == self.project:
+                raise RuntimeError("Symlink loop from the working directory")
+            return original(path, strict=strict)
+
+        with mock.patch.object(Path, "resolve", resolve):
+            code, out, err = run_both(self.cli("show", "--cwd", str(self.project)))
+        self.assertEqual(code, 2)
+        self.assertIn("No vault context: degraded (parse_error)", out)
+        self.assertNotIn("Traceback", out + err)
 
 
 if __name__ == "__main__":

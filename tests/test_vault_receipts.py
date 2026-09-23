@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from contextlib import closing
 
+from agent_efficiency.report import build_report, format_report
 from agent_efficiency.store import Store
 
 
@@ -44,6 +45,12 @@ class VaultReceiptTests(unittest.TestCase):
         self.assertTrue(self.store.has_vault_receipt("s1"))
         self.assertFalse(self.store.has_vault_receipt("s2"))
         self.assertIsNone(self.store.latest_vault_delivery("s2"))
+
+    def test_report_includes_the_vault_line(self) -> None:
+        self.record()
+        data = build_report(self.store, 30)
+        self.assertEqual(data["vault"]["emitted"], 1)
+        self.assertIn("Vault context: selected 1 | emitted 1", format_report(data))
 
     def test_rejects_free_text(self) -> None:
         for override in (

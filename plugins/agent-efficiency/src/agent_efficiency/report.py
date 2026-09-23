@@ -38,6 +38,7 @@ def build_report(
         store, days=days, session_id=session_id
     )
     data["interventions"] = store.intervention_summary(days, session_id=session_id)
+    data["vault"] = store.vault_summary(days, session_id=session_id)
     data["claim_boundary"] = (
         "Observed operational signals only. Savings require a comparable baseline."
     )
@@ -144,6 +145,16 @@ def format_report(data: dict[str, Any]) -> str:
         f"followed={_rate_text(followed)} | disabled={_rate_text(disabled)} | "
         f"false or unnecessary={_rate_text(false_rate)}"
     )
+    vault = data.get("vault")
+    if vault:
+        lines.append(
+            f"Vault context: selected {vault['selected']} | "
+            f"emitted {vault['emitted']} ({vault['chars_emitted']} characters, "
+            f"project heads {vault['head_chars']}) | "
+            f"deferred {vault['deferred']} | unavailable {vault['unavailable']} | "
+            f"skipped {vault['skipped']} | withheld {vault['withheld']} | "
+            f"degraded {vault['degraded']}"
+        )
     lines.append(
         "Claim boundary: observed results are associated with interventions. "
         "They do not establish causation or savings."
