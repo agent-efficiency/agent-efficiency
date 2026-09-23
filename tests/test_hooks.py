@@ -198,6 +198,9 @@ class HookTests(unittest.TestCase):
         )
         self.assertIsNone(parse_control("$agent-efficiency on and build this"))
 
+    def test_vault_is_a_control_word(self) -> None:
+        self.assertEqual(parse_control("$agent-efficiency vault"), "vault")
+
     def test_guard_control_requires_project_consent(self) -> None:
         output = run_hook(
             self.payload("UserPromptSubmit", prompt="$agent-efficiency guard"),

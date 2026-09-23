@@ -29,7 +29,7 @@ from agent_efficiency.store import Store, project_identity
 
 CONTROL_RE = re.compile(
     r"^\s*(?:\$|/)?(?:agent-efficiency(?::agent-efficiency)?)"
-    r"\s+(on|off|observe|advise|guard|status|help)\s*[.!]?\s*$",
+    r"\s+(on|off|observe|advise|guard|status|vault|help)\s*[.!]?\s*$",
     re.IGNORECASE,
 )
 
@@ -42,6 +42,17 @@ CURSOR_SESSION_CONTEXT = (
     "Efficiency messages are advisory checkpoints. Only local metadata is "
     "recorded; prompts, commands, code, outputs, and transcripts are not stored."
 )
+VAULT_REQUEST_MESSAGES = {
+    "no_trees": (
+        "No vault tree is registered. Run agent-efficiency vault register "
+        "PATH for each tree."
+    ),
+    "observe_mode": "Observe mode records vault selection but does not add it.",
+    "host_unsupported": (
+        "This host cannot add context from a prompt. Vault context is added "
+        "at session start."
+    ),
+}
 
 
 def run_hook(
@@ -235,7 +246,12 @@ def _run_hook(
     if event == "PostToolBatch":
         return _on_post_batch(payload, active_store, session_id, turn_key, host, mode)
     if event in {"PostToolUse", "PostToolUseFailure"}:
-        return _on_post_tool(payload, active_store, session_id, turn_key, host, mode)
+        output = _on_post_tool(payload, active_store, session_id, turn_key, host, mode)
+        if host == "cursor" and event == "PostToolUse":
+            output = _merge_cursor_context(
+                output, _deferred_vault(active_store, session_id, cwd, mode)
+            )
+        return output
     if event in {"PreCompact", "PostCompact"}:
         active_store.record_compaction(session_id, turn_key, event)
         if event == "PreCompact" and mode in {"advise", "guard"}:
@@ -358,10 +374,38 @@ def _on_prompt(
             )
         if control == "status":
             return _control_output(host, format_session_status(store, session_id))
+        if control == "vault":
+            if mode == "off":
+                return _control_output(
+                    host,
+                    "Agent Efficiency is off for this session. Turn it on to "
+                    "load vault context.",
+                )
+            from agent_efficiency.vault_delivery import deliver_vault_context
+
+            delivery = deliver_vault_context(
+                store,
+                session_id,
+                host,
+                "UserPromptSubmit",
+                Path(str(payload.get("cwd") or Path.cwd())),
+                cause="request",
+                mode=mode,
+            )
+            if delivery.output:
+                return delivery.output
+            return _control_output(
+                host,
+                VAULT_REQUEST_MESSAGES.get(
+                    delivery.reason or "",
+                    f"Vault context was not added ({delivery.disposition}).",
+                ),
+            )
         return _control_output(
             host,
-            "Agent Efficiency controls: on, observe, advise, guard, off, status. "
-            "Modes apply to this session only.",
+            "Agent Efficiency controls: on, observe, advise, guard, off, status, "
+            "vault. Modes apply to this session only. vault reloads vault "
+            "context.",
         )
 
     if mode == "off":
@@ -778,6 +822,49 @@ def _deliver_pending_cursor_guidance(
         )
     except (OSError, ValueError, sqlite3.Error):
         return None
+
+
+def _deferred_vault(
+    store: Store, session_id: str, cwd: str, mode: str
+) -> dict[str, Any] | None:
+    """Deliver vault context once when a Cursor session had no session start.
+
+    Cursor cloud agents fire no session start. The first tool result is the
+    first event that can carry context, so delivery happens there and the
+    receipt records it as deferred.
+    """
+
+    try:
+        if store.has_vault_receipt(session_id):
+            return None
+    except (OSError, ValueError, sqlite3.Error):
+        return None
+    from agent_efficiency.vault_delivery import deliver_vault_context
+
+    return deliver_vault_context(
+        store,
+        session_id,
+        "cursor",
+        "PostToolUse",
+        Path(cwd),
+        cause="deferred",
+        mode=mode,
+    ).output
+
+
+def _merge_cursor_context(
+    first: dict[str, Any] | None, second: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    if not second:
+        return first
+    if not first:
+        return second
+    parts = [
+        value
+        for value in (first.get("additional_context"), second.get("additional_context"))
+        if isinstance(value, str) and value
+    ]
+    return {**first, "additional_context": "\n\n".join(parts)}
 
 
 def _runtime_policy_id(

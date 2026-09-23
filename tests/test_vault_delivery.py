@@ -318,6 +318,55 @@ class SessionStartDeliveryTests(VaultDeliveryBase):
         )
         self.assertEqual(self.receipts("s-claude")[-1], ("resume", "delivered", None))
 
+    def test_explicit_request_reselects_and_delivers(self) -> None:
+        self.claude("SessionStart", source="startup")
+        output = self.claude(
+            "UserPromptSubmit", prompt="$agent-efficiency vault", prompt_id="turn-1"
+        )
+        context = output["hookSpecificOutput"]
+        self.assertEqual(context["hookEventName"], "UserPromptSubmit")
+        self.assertIn(HEAD, context["additionalContext"])
+        self.assertEqual(self.receipts("s-claude")[-1], ("request", "delivered", None))
+
+    def test_explicit_request_on_cursor_explains_the_limit(self) -> None:
+        self.cursor("sessionStart")
+        output = self.cursor("beforeSubmitPrompt", prompt="$agent-efficiency vault")
+        self.assertFalse(output["continue"])
+        self.assertIn("session start", output["user_message"])
+        self.assertEqual(
+            self.receipts("s-cursor")[-1],
+            ("request", "unavailable", "host_unsupported"),
+        )
+
+    def test_explicit_request_without_a_vault_says_how_to_register(self) -> None:
+        (self.store.paths.root / "vault.json").unlink()
+        output = self.claude("UserPromptSubmit", prompt="$agent-efficiency vault")
+        self.assertIn("vault register", output["stopReason"])
+
+    def tool_result(self, session: str):
+        return self.cursor(
+            "postToolUse",
+            session=session,
+            tool_name="Read",
+            tool_input={"file_path": str(self.project / "README")},
+            tool_output='{"success":true}',
+            duration=5,
+        )
+
+    def test_cursor_without_session_start_gets_the_vault_at_the_first_tool_result(
+        self,
+    ) -> None:
+        output = self.tool_result("s-cloud")
+        self.assertIn(HEAD, output["additional_context"])
+        self.assertEqual(self.receipts("s-cloud"), [("deferred", "deferred", None)])
+        again = self.tool_result("s-cloud") or {}
+        self.assertNotIn(HEAD, again.get("additional_context", ""))
+
+    def test_cursor_with_session_start_is_not_delivered_twice(self) -> None:
+        self.cursor("sessionStart", session="s-local")
+        output = self.tool_result("s-local") or {}
+        self.assertNotIn(HEAD, output.get("additional_context", ""))
+
     def test_compaction_always_redelivers(self) -> None:
         self.claude("SessionStart", source="startup")
         output = self.claude("SessionStart", source="compact")
