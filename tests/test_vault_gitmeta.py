@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 import unittest
@@ -160,6 +161,35 @@ class GitMetaTests(unittest.TestCase):
                     (("origin", "https://git.example.com/o/a"),),
                 )
 
+    def test_section_header_with_a_trailing_comment_is_read(self) -> None:
+        for comment in (" # preferred remote", "\t; preferred remote"):
+            with self.subTest(comment=comment):
+                repo = make_repo(
+                    Path(tempfile.mkdtemp(dir=self.base)),
+                    remotes={
+                        "origin": "https://git.example.com/o/origin.git",
+                        "upstream": "https://git.example.com/o/upstream.git",
+                    },
+                )
+                config = repo / ".git" / "config"
+                config.write_text(
+                    config.read_text(encoding="utf-8").replace(
+                        '[remote "origin"]', f'[remote "origin"]{comment}'
+                    ),
+                    encoding="utf-8",
+                )
+                self.assertEqual(
+                    git(repo, "config", "--get", "remote.origin.url"),
+                    "https://git.example.com/o/origin.git",
+                )
+                self.assertEqual(
+                    find_repository(repo).remotes,
+                    (
+                        ("origin", "https://git.example.com/o/origin.git"),
+                        ("upstream", "https://git.example.com/o/upstream.git"),
+                    ),
+                )
+
     def test_unreadable_marker_names_its_directory(self) -> None:
         root = self.base / "broken"
         root.mkdir()
@@ -174,7 +204,7 @@ class GitMetaTests(unittest.TestCase):
     def test_error_without_a_marker_has_no_root(self) -> None:
         denied = PermissionError(13, "Permission denied")
         with (
-            mock.patch.object(Path, "is_dir", side_effect=denied),
+            mock.patch.object(Path, "resolve", side_effect=denied),
             self.assertRaises(GitMetaError) as caught,
         ):
             find_repository(self.base / "plain")
@@ -187,13 +217,38 @@ class GitMetaTests(unittest.TestCase):
         with self.assertRaises(GitMetaError):
             find_repository(root)
 
-    def test_unreadable_marker_is_reported(self) -> None:
-        denied = PermissionError(13, "Permission denied")
+    def test_marker_that_cannot_be_checked_stops_the_walk(self) -> None:
+        outer = make_repo(self.base / "outer")
+        inner = outer / "inner"
+        inner.mkdir()
+        original = Path.lstat
+
+        def lstat(path: Path):
+            if path == inner / ".git":
+                raise PermissionError(13, "Permission denied", str(path))
+            return original(path)
+
         with (
-            mock.patch.object(Path, "is_file", side_effect=denied),
-            self.assertRaises(GitMetaError),
+            mock.patch.object(Path, "lstat", lstat),
+            self.assertRaises(GitMetaError) as caught,
         ):
-            find_repository(self.base / "plain")
+            find_repository(inner)
+        self.assertEqual(caught.exception.root, inner)
+
+    def test_marker_that_cannot_be_followed_names_its_directory(self) -> None:
+        if os.geteuid() == 0:
+            self.skipTest("root reads through any permission")
+        outer = make_repo(self.base / "outer")
+        inner = make_repo(outer / "inner")
+        protected = self.base / "protected"
+        protected.mkdir()
+        (inner / ".git").rename(protected / "gitdir")
+        (inner / ".git").symlink_to(protected / "gitdir", target_is_directory=True)
+        protected.chmod(0)
+        self.addCleanup(protected.chmod, 0o700)
+        with self.assertRaises(GitMetaError) as caught:
+            find_repository(inner)
+        self.assertEqual(caught.exception.root, inner)
 
 
 if __name__ == "__main__":

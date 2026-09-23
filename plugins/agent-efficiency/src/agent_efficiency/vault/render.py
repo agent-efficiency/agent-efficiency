@@ -24,6 +24,10 @@ from agent_efficiency.vault.select import Selection
 ALLOWANCE = 9000
 # Held back once anything must be dropped, so the omission line always fits.
 OMISSION_RESERVE = 160
+# Held back from every rendering, whatever the cause, so the line a reselection
+# adds after the header still fits the allowance and the digest of the rendered
+# text does not depend on the cause. It covers that line and its newline.
+RESELECT_RESERVE = 100
 HEAD_CAP = CAPS["project"]
 TITLE_CAP = 100
 LINE_TYPES = ("feedback", "doctrine", "reference")
@@ -86,6 +90,7 @@ def render(
 ) -> Rendered:
     lead = [HEADER]
     head_chars = 0
+    head_omitted = 0
     truncated = False
     head_error = False
     head_loaded = False
@@ -107,7 +112,9 @@ def render(
             # belong to a note that is over its cap.
             over_cap = entry.get("within_cap") is False or len(body) > HEAD_CAP
             if len(body) > HEAD_CAP:
-                body = _cut(body, HEAD_CAP)
+                cut = _cut(body, HEAD_CAP)
+                head_omitted = len(body) - len(cut)
+                body = cut
                 truncated = True
             head_chars = len(body)
             lead.append(
@@ -141,7 +148,8 @@ def render(
     parts = [first]
     selected = 1 if head_loaded else 0
     omitted: Counter[str] = Counter()
-    chars_omitted = 0
+    # The part of a head cut to its cap was left out too.
+    chars_omitted = head_omitted
     stopped = False
     for category, heading, lines in groups:
         accepted: list[str] = []

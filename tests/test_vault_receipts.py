@@ -46,6 +46,63 @@ class VaultReceiptTests(unittest.TestCase):
         self.assertFalse(self.store.has_vault_receipt("s2"))
         self.assertIsNone(self.store.latest_vault_delivery("s2"))
 
+    def test_record_once_inserts_only_the_first_receipt(self) -> None:
+        values = {
+            "cause": "deferred",
+            "vault_revision": "a" * 16,
+            "payload_digest": "b" * 16,
+            "notes_selected": 3,
+            "head_chars": 120,
+            "chars_emitted": 900,
+            "chars_omitted": 0,
+            "disposition": "deferred",
+        }
+        self.record(cause="request", disposition="unavailable")
+        first = self.store.record_vault_receipt_once(
+            "s1", exclude_cause="request", **values
+        )
+        self.assertIsInstance(first, int)
+        self.assertIsNone(
+            self.store.record_vault_receipt_once(
+                "s1", exclude_cause="request", **values
+            )
+        )
+        with closing(sqlite3.connect(self.store.paths.database)) as conn:
+            causes = [
+                row[0]
+                for row in conn.execute(
+                    "SELECT cause FROM vault_receipts ORDER BY id"
+                ).fetchall()
+            ]
+        self.assertEqual(causes, ["request", "deferred"])
+        with self.assertRaises(ValueError):
+            self.store.record_vault_receipt_once(
+                "s2", exclude_cause="request", **{**values, "cause": "boot"}
+            )
+
+    def test_compaction_is_due_until_each_one_has_a_compact_receipt(self) -> None:
+        self.assertTrue(self.store.vault_compaction_due("s1"))
+        self.store.record_compaction("s1", "t1", "PreCompact")
+        self.assertTrue(self.store.vault_compaction_due("s1"))
+        self.record(cause="compact", disposition="skipped", reason_code="unchanged")
+        self.record(cause="compact", disposition="unavailable", reason_code="timeout")
+        self.record(cause="new")
+        self.assertTrue(self.store.vault_compaction_due("s1"))
+        self.record(cause="compact", disposition="truncated")
+        self.assertFalse(self.store.vault_compaction_due("s1"))
+        self.store.record_compaction("s1", "t1", "PostCompact")
+        self.assertFalse(self.store.vault_compaction_due("s1"))
+        self.store.record_compaction("s1", "t2", "PreCompact")
+        self.assertTrue(self.store.vault_compaction_due("s1"))
+        self.record(cause="compact", disposition="degraded", reason_code="parse_error")
+        self.assertFalse(self.store.vault_compaction_due("s1"))
+        self.store.record_compaction("s1", "t3", "PreCompact")
+        self.record(cause="compact", disposition="withheld", reason_code="observe_mode")
+        self.assertFalse(self.store.vault_compaction_due("s1"))
+        self.store.ensure_session("s2", host="claude", cwd="/work/project")
+        self.store.record_compaction("s2", "t1", "PreCompact")
+        self.assertTrue(self.store.vault_compaction_due("s2"))
+
     def test_report_includes_the_vault_line(self) -> None:
         self.record()
         data = build_report(self.store, 30)

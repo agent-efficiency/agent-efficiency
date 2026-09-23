@@ -19,7 +19,12 @@ from pathlib import Path
 
 from agent_efficiency.vault.config import VaultConfigError, load_trees
 from agent_efficiency.vault.gitmeta import GitMetaError, find_repository
-from agent_efficiency.vault.render import Rendered, render
+from agent_efficiency.vault.render import (
+    ALLOWANCE,
+    RESELECT_RESERVE,
+    Rendered,
+    render,
+)
 from agent_efficiency.vault.root import VaultTree
 from agent_efficiency.vault.select import (
     Selection,
@@ -72,7 +77,9 @@ def prepare(
         selection = select_project(cwd, repository, indexes, boundary=boundary)
         if clock() - started > TIME_BUDGET_NS:
             return stopped("degraded", "timeout")
-        rendered = render(selection, by_name, indexes)
+        rendered = render(
+            selection, by_name, indexes, allowance=ALLOWANCE - RESELECT_RESERVE
+        )
     except (KeyError, TypeError, OSError, RuntimeError, ValueError):
         # A hand-edited index can drop a field the generator always writes,
         # and the working directory or a note path can fail to resolve.

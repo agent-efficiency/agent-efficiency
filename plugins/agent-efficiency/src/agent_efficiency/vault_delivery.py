@@ -10,10 +10,16 @@ Lifecycle causes:
 * ``new``: select, render, deliver.
 * ``resume``: deliver only if the rendered text changed since the last delivery
   in this session.
-* ``compact``: always deliver, because the earlier context is gone.
+* ``compact``: deliver once per compaction, because the earlier context is
+  gone. A host can send more than one event after a compaction, and the first
+  one delivers.
 * ``request``: an explicit prompt; always reselect and deliver.
 * ``deferred``: a host with no session start delivers at the first event that
   can carry context.
+
+A ``request`` or ``compact`` delivery carries one line after the vault header
+saying it replaces earlier vault context. The line is added here, not in the
+renderer, so ``vault show`` and the digest cover only the rendered text.
 """
 
 from __future__ import annotations
@@ -28,6 +34,7 @@ from agent_efficiency.adapters.base import BaseAdapter
 from agent_efficiency.contracts.effects import CanonicalEffect
 from agent_efficiency.store import Store
 from agent_efficiency.vault.prepare import Prepared, prepare, stopped
+from agent_efficiency.vault.render import HEADER
 
 AGENT_PREFIX = "Agent Efficiency: "
 SESSION_CAUSES = {
@@ -37,6 +44,12 @@ SESSION_CAUSES = {
     "compact": "compact",
 }
 EMITTED = frozenset({"delivered", "truncated", "deferred"})
+# A reselection can load a different project than earlier in the session, so
+# the model is told which context is current.
+RESELECTED = frozenset({"request", "compact"})
+REPLACES = (
+    "This vault context replaces any vault context loaded earlier in this session."
+)
 DEGRADED_NOTICE = (
     "Vault context is unavailable this session ({reason}). "
     "Run agent-efficiency vault show to see why."
@@ -95,6 +108,8 @@ def deliver_vault_context(
         # No registered tree means the feature is not in use, so there is
         # nothing to record.
         return Delivery(None, "unavailable", "no_trees")
+    if cause == "compact" and not _compaction_due(store, session_id):
+        return _finish(store, session_id, cause, prepared, "skipped", "unchanged")
     if prepared.status == "unavailable":
         return _finish(store, session_id, cause, prepared, "unavailable")
     if prepared.status == "degraded":
@@ -112,7 +127,8 @@ def deliver_vault_context(
             store, session_id, cause, prepared, "unavailable", "host_unsupported"
         )
     rendered = prepared.rendered
-    output = _render(adapter, event, lead, rendered.text)
+    text = _replacing(rendered.text) if cause in RESELECTED else rendered.text
+    output = _render(adapter, event, lead, text)
     if output is None:
         return _finish(
             store, session_id, cause, prepared, "unavailable", "host_unsupported"
@@ -123,7 +139,15 @@ def deliver_vault_context(
         disposition = "truncated"
     else:
         disposition = "delivered"
-    return _finish(store, session_id, cause, prepared, disposition, output=output)
+    return _finish(
+        store,
+        session_id,
+        cause,
+        prepared,
+        disposition,
+        output=output,
+        emitted=len(text),
+    )
 
 
 def _render(
@@ -145,6 +169,22 @@ def _render(
         return None
 
 
+def _replacing(text: str) -> str:
+    """Put the replacement line directly after the vault header."""
+
+    if text.startswith(HEADER):
+        return f"{HEADER}\n{REPLACES}{text[len(HEADER) :]}"
+    return f"{REPLACES}\n\n{text}"
+
+
+def _compaction_due(store: Store, session_id: str) -> bool:
+    try:
+        return store.vault_compaction_due(session_id)
+    except (OSError, ValueError, sqlite3.Error):
+        # A second copy is better than no context after a compaction.
+        return True
+
+
 def _unchanged(store: Store, session_id: str, digest: str) -> bool:
     try:
         last = store.latest_vault_delivery(session_id)
@@ -162,24 +202,38 @@ def _finish(
     reason: str | None = None,
     *,
     output: dict[str, Any] | None = None,
+    emitted: int = 0,
 ) -> Delivery:
+    """Record the receipt. ``emitted`` is the length of the vault text sent."""
+
     code = reason if reason is not None else prepared.reason
     rendered = prepared.rendered
+    fields: dict[str, Any] = {
+        "cause": cause,
+        "vault_revision": prepared.revision,
+        "payload_digest": prepared.digest,
+        "notes_selected": rendered.notes_selected if rendered else 0,
+        "head_chars": rendered.head_chars if rendered else 0,
+        "chars_emitted": emitted if disposition in EMITTED else 0,
+        "chars_omitted": rendered.chars_omitted if rendered else 0,
+        "disposition": disposition,
+        "reason_code": code,
+    }
+    if cause == "deferred":
+        # Several tool results can race to make the deferred delivery. Only
+        # the one that records the receipt sends its output. A claim that
+        # cannot be recorded sends nothing, so the next tool result retries.
+        try:
+            claimed = store.record_vault_receipt_once(
+                session_id, exclude_cause="request", **fields
+            )
+        except (OSError, ValueError, sqlite3.Error):
+            return Delivery(None, disposition, code)
+        if claimed is None:
+            return Delivery(None, "skipped", "unchanged")
+        return Delivery(output, disposition, code)
     try:
-        store.record_vault_receipt(
-            session_id,
-            cause=cause,
-            vault_revision=prepared.revision,
-            payload_digest=prepared.digest,
-            notes_selected=rendered.notes_selected if rendered else 0,
-            head_chars=rendered.head_chars if rendered else 0,
-            chars_emitted=(
-                len(rendered.text) if rendered and disposition in EMITTED else 0
-            ),
-            chars_omitted=rendered.chars_omitted if rendered else 0,
-            disposition=disposition,
-            reason_code=code,
-        )
+        store.record_vault_receipt(session_id, **fields)
     except (OSError, ValueError, sqlite3.Error):
         # Measurement cannot change what the session receives.
         pass

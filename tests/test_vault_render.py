@@ -128,6 +128,7 @@ class RenderTests(unittest.TestCase):
         )
         self.assertEqual((out.truncated, out.over_cap), (True, True))
         self.assertLessEqual(out.head_chars, HEAD_CAP)
+        self.assertEqual(out.chars_omitted, len(body) - out.head_chars)
         self.assertIn(f"over its {HEAD_CAP} character cap", out.text)
 
     def test_matched_head_with_an_empty_body_is_selected(self) -> None:

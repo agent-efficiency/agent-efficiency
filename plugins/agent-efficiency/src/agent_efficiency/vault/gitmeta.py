@@ -21,14 +21,15 @@ path only.
 from __future__ import annotations
 
 import re
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 
 from agent_efficiency.vault.root import VaultRootError, normalize_remote
 
 # The section keyword and the key are case-insensitive in git; the remote
-# name is not.
-_REMOTE_SECTION = re.compile(r'^\[\s*(?i:remote)\s+"([^"]+)"\s*\]$')
+# name is not. A comment may follow the closing bracket.
+_REMOTE_SECTION = re.compile(r'^\[\s*(?i:remote)\s+"([^"]+)"\s*\]\s*(?:[#;].*)?$')
 _URL = re.compile(r"^url\s*=\s*(.+)$", re.IGNORECASE)
 _COMMENT = re.compile(r"\s[;#].*$")
 _SHA = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
@@ -91,16 +92,32 @@ def find_repository(start: Path) -> Repository | None:
 
 
 def _find(start: Path) -> Repository | None:
+    """Walk upward to the first ``.git`` marker.
+
+    A marker is found with ``lstat``, so one that exists but cannot be
+    followed still marks a repository. A directory whose marker cannot be
+    checked, or whose marker cannot be followed or read, raises with that
+    directory as the boundary. The walk never continues past it, because a
+    parent repository must not be mistaken for the nearest one.
+    """
+
     current = start.expanduser().resolve()
     for candidate in (current, *current.parents):
         marker = candidate / ".git"
-        is_dir = marker.is_dir()
-        if is_dir or marker.is_file():
-            try:
-                git_dir = marker if is_dir else _gitdir_from_file(candidate, marker)
-                return _load(candidate, git_dir)
-            except (OSError, ValueError, RuntimeError) as exc:
-                raise GitMetaError(str(exc), root=candidate) from None
+        try:
+            marker.lstat()
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+        except OSError as exc:
+            raise GitMetaError(
+                f"{marker} could not be checked: {exc}", root=candidate
+            ) from None
+        try:
+            is_dir = stat.S_ISDIR(marker.stat().st_mode)
+            git_dir = marker if is_dir else _gitdir_from_file(candidate, marker)
+            return _load(candidate, git_dir)
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise GitMetaError(str(exc), root=candidate) from None
     return None
 
 

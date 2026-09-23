@@ -5,18 +5,34 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from pathlib import Path
 from unittest import mock
 
 import agent_efficiency
-from agent_efficiency.hook import CURSOR_SESSION_CONTEXT, VAULT_CONFIG_NAME, run_hook
+from agent_efficiency.hook import (
+    CURSOR_SESSION_CONTEXT,
+    VAULT_CONFIG_NAME,
+    _deferred_vault,
+    run_hook,
+)
 from agent_efficiency.store import Store
+from agent_efficiency.vault import prepare as prepare_module
 from agent_efficiency.vault.config import CONFIG_NAME
 from agent_efficiency.vault.index import write_index
-from agent_efficiency.vault.render import UNMAPPED
+from agent_efficiency.vault.prepare import prepare
+from agent_efficiency.vault.render import (
+    ALLOWANCE,
+    HEADER,
+    RESELECT_RESERVE,
+    UNMAPPED,
+    render,
+)
 from agent_efficiency.vault_delivery import (
+    REPLACES,
     Delivery,
     deliver_vault_context,
     session_cause,
@@ -274,6 +290,21 @@ class SessionStartDeliveryTests(VaultDeliveryBase):
         self.assertEqual(row[5], len(text))
         self.assertGreater(row[6], 0)
 
+    def test_cut_project_head_counts_as_omitted(self) -> None:
+        body = "z" * 5000
+        note = self.private / "projects" / "catalog.md"
+        note.write_text(
+            note_text("catalog", repos=("example/catalog",), body=body),
+            encoding="utf-8",
+        )
+        write_index(self.private)
+        output = self.claude("SessionStart", source="startup")
+        text = output["hookSpecificOutput"]["additionalContext"]
+        (row,) = self.counts("s-claude")
+        self.assertEqual(row[:3], ("new", "truncated", "cap_exceeded"))
+        self.assertEqual(row[5], len(text))
+        self.assertGreaterEqual(row[6], 2000)
+
     def test_codex_session_start_uses_the_same_contract(self) -> None:
         output = self.claude(
             "SessionStart", session="s-codex", env=CODEX_ENV, source="startup"
@@ -330,6 +361,98 @@ class SessionStartDeliveryTests(VaultDeliveryBase):
         self.assertIn(HEAD, context["additionalContext"])
         self.assertEqual(self.receipts("s-claude")[-1], ("request", "delivered", None))
 
+    def test_reselection_says_it_replaces_earlier_context(self) -> None:
+        other = make_repo(
+            self.base / "other-project",
+            remotes={"origin": "https://git.example.com/o/other.git"},
+        )
+        work = make_vault_tree(
+            self.base / "vault-work",
+            "work",
+            [
+                note_text(
+                    "other-work",
+                    classification="work",
+                    repos=("o/other",),
+                    body="OTHER-PROJECT-HEAD",
+                )
+            ],
+        )
+        register_trees(self.store.paths.root, self.core, self.private, work)
+        first = self.claude("SessionStart", session="s-scope", source="startup")
+        self.assertNotIn(REPLACES, first["hookSpecificOutput"]["additionalContext"])
+        output = self.claude(
+            "UserPromptSubmit",
+            session="s-scope",
+            cwd=other,
+            prompt="$agent-efficiency vault",
+        )
+        text = output["hookSpecificOutput"]["additionalContext"]
+        self.assertTrue(text.startswith(f"{HEADER}\n{REPLACES}\n\n"))
+        self.assertIn("OTHER-PROJECT-HEAD", text)
+        self.assertNotIn(HEAD, text)
+        self.assertEqual(
+            self.receipts("s-scope"),
+            [("new", "delivered", None), ("request", "delivered", None)],
+        )
+        self.assertEqual(
+            self.store.latest_vault_delivery("s-scope")["payload_digest"],
+            prepare(other, self.store.paths.root).digest,
+        )
+
+    def full_length(self) -> int:
+        """Return the length of the vault text with no allowance at all."""
+
+        def unbounded(selection, trees, indexes, **_: object):
+            return render(selection, trees, indexes, allowance=10**6)
+
+        with mock.patch.object(prepare_module, "render", unbounded):
+            return len(
+                prepare(self.project / "src", self.store.paths.root).rendered.text
+            )
+
+    def fill_to_allowance(self) -> None:
+        """Register a core tree whose whole rendering is exactly the allowance."""
+
+        root = self.base / "vault-core-fill"
+        lengths = [90] * 75
+
+        def write(number: int) -> str:
+            return note_text(
+                f"rule-{number:03d}",
+                note_type="feedback",
+                classification="core",
+                hook="h" * lengths[number],
+            )
+
+        core = make_vault_tree(root, "core", [write(n) for n in range(len(lengths))])
+        register_trees(self.store.paths.root, core, self.private)
+        missing = ALLOWANCE - self.full_length()
+        self.assertTrue(0 <= missing <= 10 * len(lengths))
+        for number in range(len(lengths)):
+            added = min(10, missing)
+            if not added:
+                break
+            lengths[number] += added
+            missing -= added
+            path = root / "feedback" / f"rule-{number:03d}.md"
+            path.write_text(write(number), encoding="utf-8")
+        write_index(root)
+        self.assertEqual(self.full_length(), ALLOWANCE)
+
+    def test_reselection_line_fits_inside_the_allowance(self) -> None:
+        self.assertGreater(RESELECT_RESERVE, len(REPLACES) + 1)
+        self.fill_to_allowance()
+        self.claude("SessionStart", source="startup")
+        output = self.claude("UserPromptSubmit", prompt="$agent-efficiency vault")
+        text = output["hookSpecificOutput"]["additionalContext"]
+        self.assertIn(REPLACES, text)
+        self.assertIn(HEAD, text)
+        self.assertLessEqual(len(text), ALLOWANCE)
+        rows = self.counts("s-claude")
+        self.assertEqual(rows[-1][:2], ("request", "truncated"))
+        self.assertEqual(rows[-1][5], len(text))
+
     def test_explicit_request_on_cursor_explains_the_limit(self) -> None:
         self.cursor("sessionStart")
         output = self.cursor("beforeSubmitPrompt", prompt="$agent-efficiency vault")
@@ -373,6 +496,57 @@ class SessionStartDeliveryTests(VaultDeliveryBase):
         self.assertEqual(self.receipts("s-cloud"), [("deferred", "deferred", None)])
         again = self.tool_result("s-cloud") or {}
         self.assertNotIn(HEAD, again.get("additional_context", ""))
+
+    def test_concurrent_tool_results_deliver_the_deferred_vault_once(self) -> None:
+        self.cursor(
+            "beforeSubmitPrompt", session="s-race", prompt="Explain the parser."
+        )
+        barrier = threading.Barrier(4)
+
+        def worker(_: int):
+            barrier.wait(timeout=10)
+            return _deferred_vault(self.store, "s-race", str(self.project), "advise")
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            results = list(pool.map(worker, range(4)))
+        delivered = [
+            result
+            for result in results
+            if result and HEAD in result.get("additional_context", "")
+        ]
+        self.assertEqual(len(delivered), 1)
+        self.assertEqual(self.receipts("s-race"), [("deferred", "deferred", None)])
+
+    def test_deferred_vault_is_not_sent_when_its_claim_fails(self) -> None:
+        locked = sqlite3.OperationalError("database is locked")
+        with mock.patch.object(Store, "record_vault_receipt_once", side_effect=locked):
+            output = self.tool_result("s-locked") or {}
+        self.assertNotIn(HEAD, output.get("additional_context", ""))
+        self.assertEqual(self.receipts("s-locked"), [])
+        retry = self.tool_result("s-locked")
+        self.assertIn(HEAD, retry["additional_context"])
+        again = self.tool_result("s-locked") or {}
+        self.assertNotIn(HEAD, again.get("additional_context", ""))
+        self.assertEqual(self.receipts("s-locked"), [("deferred", "deferred", None)])
+
+    def test_cursor_tool_result_surfaces_an_unreadable_tree_list(self) -> None:
+        config = self.store.paths.root / VAULT_CONFIG_NAME
+        original = Path.is_file
+
+        def is_file(path: Path) -> bool:
+            if path == config:
+                raise PermissionError(13, "Permission denied", str(path))
+            return original(path)
+
+        with mock.patch.object(Path, "is_file", is_file):
+            output = self.tool_result("s-denied")
+        self.assertIn(
+            "Vault context is unavailable this session (parse_error)",
+            output["additional_context"],
+        )
+        self.assertEqual(
+            self.receipts("s-denied"), [("deferred", "degraded", "parse_error")]
+        )
 
     def test_cursor_vault_request_does_not_block_the_deferred_delivery(
         self,
@@ -421,6 +595,69 @@ class SessionStartDeliveryTests(VaultDeliveryBase):
         output = self.claude("SessionStart", source="compact")
         self.assertIn(HEAD, output["hookSpecificOutput"]["additionalContext"])
         self.assertEqual(self.receipts("s-claude")[-1], ("compact", "delivered", None))
+
+    def test_claude_compaction_delivers_once_at_session_start(self) -> None:
+        self.claude("SessionStart", source="startup")
+        self.assertIsNone(self.claude("PreCompact"))
+        output = self.claude("SessionStart", source="compact")
+        self.assertIn(HEAD, output["hookSpecificOutput"]["additionalContext"])
+        self.assertIsNone(self.claude("PostCompact"))
+        self.assertEqual(
+            self.receipts("s-claude"),
+            [("new", "delivered", None), ("compact", "delivered", None)],
+        )
+
+    def test_compaction_delivers_once_when_post_compact_comes_first(self) -> None:
+        self.claude("SessionStart", source="startup")
+        self.claude("PreCompact")
+        output = self.claude("PostCompact")
+        context = output["hookSpecificOutput"]
+        self.assertEqual(context["hookEventName"], "PostCompact")
+        self.assertIn(HEAD, context["additionalContext"])
+        self.assertIsNone(self.claude("SessionStart", source="compact"))
+        self.assertEqual(
+            self.receipts("s-claude"),
+            [
+                ("new", "delivered", None),
+                ("compact", "delivered", None),
+                ("compact", "skipped", "unchanged"),
+            ],
+        )
+
+    def test_each_compaction_delivers_again(self) -> None:
+        self.claude("SessionStart", source="startup")
+        for _ in range(2):
+            self.claude("PreCompact")
+            output = self.claude("SessionStart", source="compact")
+            self.assertIn(HEAD, output["hookSpecificOutput"]["additionalContext"])
+            self.assertIsNone(self.claude("PostCompact"))
+        self.assertEqual(
+            [row[:2] for row in self.receipts("s-claude")],
+            [("new", "delivered"), ("compact", "delivered"), ("compact", "delivered")],
+        )
+
+    def test_codex_compaction_delivers_at_post_compact(self) -> None:
+        for session, pre_compact in (("s-codex", False), ("s-codex-pre", True)):
+            with self.subTest(pre_compact=pre_compact):
+                self.claude(
+                    "SessionStart", session=session, env=CODEX_ENV, source="startup"
+                )
+                if pre_compact:
+                    self.claude("PreCompact", session=session, env=CODEX_ENV)
+                output = self.claude("PostCompact", session=session, env=CODEX_ENV)
+                text = output["hookSpecificOutput"]["additionalContext"]
+                self.assertTrue(text.startswith(f"{HEADER}\n{REPLACES}\n\n"))
+                self.assertIn(HEAD, text)
+                self.assertEqual(
+                    self.receipts(session),
+                    [("new", "delivered", None), ("compact", "delivered", None)],
+                )
+
+    def test_post_compact_in_off_mode_delivers_nothing(self) -> None:
+        self.claude("SessionStart", source="startup")
+        self.claude("UserPromptSubmit", prompt="$agent-efficiency off")
+        self.assertIsNone(self.claude("PostCompact"))
+        self.assertEqual(self.receipts("s-claude"), [("new", "delivered", None)])
 
     def test_observe_mode_records_but_withholds(self) -> None:
         self.store.set_default_mode("observe")
@@ -490,6 +727,14 @@ LAZY_IMPORT_CASES = {
             "hook_event_name": "UserPromptSubmit",
             "prompt": "Explain the parser.",
             "prompt_id": "t1",
+        },
+        {"CLAUDE_PLUGIN_ROOT": "/plugin"},
+    ),
+    "claude compaction without a vault": (
+        {
+            "session_id": "s-lazy",
+            "cwd": "@TEMP@",
+            "hook_event_name": "PostCompact",
         },
         {"CLAUDE_PLUGIN_ROOT": "/plugin"},
     ),

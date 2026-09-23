@@ -105,6 +105,64 @@ class SelectProjectTests(unittest.TestCase):
         idx = indexes(private=[entry("catalog", repos=("example/catalog",))])
         self.assertEqual(self.select(repo, idx).entry["id"], "catalog")
 
+    def test_qualified_remote_matches_only_exactly(self) -> None:
+        repo = make_repo(
+            self.base / "app",
+            remotes={"origin": "https://gitlab.com/git.example.com/acme/widget.git"},
+        )
+        idx = indexes(
+            private=[entry("widget", repos=("https://git.example.com/acme/widget.git",))]
+        )
+        self.assertEqual(self.select(repo, idx).outcome, "unmapped")
+        for raw in (
+            "git.example.com/acme/widget",
+            "git@git.example.com:acme/widget.git",
+            "acme/widget/extra",
+        ):
+            with self.subTest(raw=raw):
+                idx = indexes(private=[entry("widget", repos=(raw,))])
+                self.assertEqual(self.select(repo, idx).outcome, "unmapped")
+        exact = indexes(
+            private=[
+                entry(
+                    "widget",
+                    repos=("https://gitlab.com/git.example.com/acme/widget.git",),
+                )
+            ]
+        )
+        self.assertEqual(self.select(repo, exact).entry["id"], "widget")
+
+    def test_bare_owner_and_name_matches_any_host(self) -> None:
+        repo = make_repo(
+            self.base / "app",
+            remotes={"origin": "https://git.example.com/example/catalog.git"},
+        )
+        idx = indexes(private=[entry("catalog", repos=(" example/catalog ",))])
+        self.assertEqual(self.select(repo, idx).entry["id"], "catalog")
+
+    def test_origin_with_a_commented_section_header_is_preferred(self) -> None:
+        repo = make_repo(
+            self.base / "app",
+            remotes={
+                "origin": "https://git.example.com/o/origin.git",
+                "upstream": "https://git.example.com/o/upstream.git",
+            },
+        )
+        config = repo / ".git" / "config"
+        config.write_text(
+            config.read_text(encoding="utf-8").replace(
+                '[remote "origin"]', '[remote "origin"] # preferred remote'
+            ),
+            encoding="utf-8",
+        )
+        idx = indexes(
+            private=[
+                entry("origin-note", repos=("o/origin",)),
+                entry("upstream-note", repos=("o/upstream",)),
+            ]
+        )
+        self.assertEqual(self.select(repo, idx).entry["id"], "origin-note")
+
     def test_subdirectory_note_is_not_loaded_elsewhere_in_its_repository(
         self,
     ) -> None:

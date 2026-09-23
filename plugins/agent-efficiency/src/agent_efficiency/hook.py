@@ -259,6 +259,8 @@ def _run_hook(
         return output
     if event in {"PreCompact", "PostCompact"}:
         active_store.record_compaction(session_id, turn_key, event)
+        if event == "PostCompact":
+            return _compact_vault(active_store, session_id, host, cwd, mode)
         if event == "PreCompact" and mode in {"advise", "guard"}:
             turn = active_store.get_turn(session_id, turn_key) or {}
             if int(turn.get("failure_count") or 0) >= 2:
@@ -839,9 +841,9 @@ def _deferred_vault(
     receipt records it as deferred.
     """
 
+    if not _vault_registered(store):
+        return None
     try:
-        if not (store.paths.root / VAULT_CONFIG_NAME).is_file():
-            return None
         if store.has_vault_receipt(session_id, exclude_cause="request"):
             return None
     except (OSError, ValueError, sqlite3.Error):
@@ -857,6 +859,48 @@ def _deferred_vault(
         cause="deferred",
         mode=mode,
     ).output
+
+
+def _compact_vault(
+    store: Store, session_id: str, host: str, cwd: str, mode: str
+) -> dict[str, Any] | None:
+    """Deliver vault context after a compaction if no event has done it yet.
+
+    Some hosts send a session start after a compaction and some send only
+    ``PostCompact``. Whichever arrives first delivers.
+    """
+
+    if not _vault_registered(store):
+        return None
+    try:
+        due = store.vault_compaction_due(session_id)
+    except (OSError, ValueError, sqlite3.Error):
+        # A second copy is better than no context after a compaction.
+        due = True
+    if not due:
+        return None
+    from agent_efficiency.vault_delivery import deliver_vault_context
+
+    return deliver_vault_context(
+        store,
+        session_id,
+        host,
+        "PostCompact",
+        Path(cwd),
+        cause="compact",
+        mode=mode,
+    ).output
+
+
+def _vault_registered(store: Store) -> bool:
+    """Return whether a vault tree list may exist, without loading the vault."""
+
+    try:
+        return (store.paths.root / VAULT_CONFIG_NAME).is_file()
+    except OSError:
+        # A tree list that cannot be checked may still be registered. Delivery
+        # reports it as degraded, so the failure is visible.
+        return True
 
 
 def _merge_cursor_context(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import time
 import unittest
@@ -157,6 +158,19 @@ class PrepareTests(unittest.TestCase):
             (result.reason, result.rendered.truncated), ("cap_exceeded", False)
         )
 
+    def test_cut_head_characters_count_as_omitted(self) -> None:
+        body = "z" * 5000
+        tree = make_vault_tree(
+            self.base / "vault-large",
+            "private",
+            [note_text("catalog", repos=("example/catalog",), body=body)],
+        )
+        register_trees(self.data, self.core, tree)
+        result = prepare(self.project, self.data)
+        self.assertTrue(result.rendered.truncated)
+        self.assertEqual(result.rendered.head_chars, HEAD_CAP)
+        self.assertEqual(result.rendered.chars_omitted, len(body) - HEAD_CAP)
+
     def test_nested_repository_with_unreadable_metadata_keeps_its_boundary(
         self,
     ) -> None:
@@ -174,6 +188,48 @@ class PrepareTests(unittest.TestCase):
         register_trees(self.data, self.core, tree)
         self.assertEqual(prepare(outer, self.data).selection.outcome, "matched")
         self.assertEqual(prepare(inner, self.data).selection.outcome, "unmapped")
+
+    def outer_note_tree(self, outer: Path) -> None:
+        tree = make_vault_tree(
+            self.base / "vault-outer",
+            "private",
+            [note_text("outer", paths=(str(outer),))],
+        )
+        register_trees(self.data, self.core, tree)
+
+    def test_nested_marker_that_cannot_be_followed_keeps_its_boundary(
+        self,
+    ) -> None:
+        if os.geteuid() == 0:
+            self.skipTest("root reads through any permission")
+        outer = make_repo(self.base / "outer")
+        inner = make_repo(outer / "inner")
+        protected = self.base / "protected"
+        protected.mkdir()
+        (inner / ".git").rename(protected / "gitdir")
+        (inner / ".git").symlink_to(protected / "gitdir", target_is_directory=True)
+        self.outer_note_tree(outer)
+        protected.chmod(0)
+        self.addCleanup(protected.chmod, 0o700)
+        self.assertEqual(prepare(inner, self.data).selection.outcome, "unmapped")
+
+    def test_nested_marker_that_cannot_be_checked_keeps_its_boundary(
+        self,
+    ) -> None:
+        outer = make_repo(self.base / "outer")
+        inner = outer / "inner"
+        inner.mkdir()
+        self.outer_note_tree(outer)
+        original = Path.lstat
+
+        def lstat(path: Path):
+            if path == inner / ".git":
+                raise PermissionError(13, "Permission denied", str(path))
+            return original(path)
+
+        with mock.patch.object(Path, "lstat", lstat):
+            result = prepare(inner, self.data)
+        self.assertEqual(result.selection.outcome, "unmapped")
 
     def test_realistic_vault_prepares_well_inside_the_hook_budget(self) -> None:
         notes = [

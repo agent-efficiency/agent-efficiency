@@ -188,6 +188,12 @@ def _within(path: Path, base: Path) -> bool:
 
 
 def _repo_match(entry: dict, identity: str) -> bool:
+    """Match a ``repos`` entry against the repository identity.
+
+    A bare ``owner/name`` entry matches that repository on any host. Any other
+    entry names a host or a location, so it must equal the identity.
+    """
+
     if not identity:
         return False
     for raw in entry.get("repos", []):
@@ -195,9 +201,19 @@ def _repo_match(entry: dict, identity: str) -> bool:
             value = normalize_remote(raw)
         except VaultRootError:
             continue
-        if value == identity or ("/" in value and identity.endswith("/" + value)):
+        if value == identity or (_is_bare_repo(raw) and identity.endswith("/" + value)):
             return True
     return False
+
+
+def _is_bare_repo(raw: str) -> bool:
+    """Return whether ``raw`` is ``owner/name`` with no host or scheme."""
+
+    text = raw.strip()
+    if "@" in text or ":" in text:
+        return False
+    parts = text.split("/")
+    return len(parts) == 2 and all(parts)
 
 
 def _scope(classification: str | None, indexes: Mapping[str, dict]) -> tuple[str, ...]:

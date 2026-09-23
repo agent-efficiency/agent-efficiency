@@ -1542,6 +1542,60 @@ class Store:
     ) -> int:
         """Record one vault delivery decision as counts, digests, and codes."""
 
+        row = self._vault_receipt_row(
+            session_id,
+            cause=cause,
+            vault_revision=vault_revision,
+            payload_digest=payload_digest,
+            notes_selected=notes_selected,
+            head_chars=head_chars,
+            chars_emitted=chars_emitted,
+            chars_omitted=chars_omitted,
+            disposition=disposition,
+            reason_code=reason_code,
+        )
+        with self.connect() as conn:
+            return self._insert_vault_receipt(conn, row)
+
+    def record_vault_receipt_once(
+        self, session_id: str, *, exclude_cause: str, **fields: Any
+    ) -> int | None:
+        """Record a receipt only if the session has none of another cause.
+
+        The check and the insert share one immediate transaction, so when
+        several events race to make the first delivery, exactly one records it.
+        Return the new row id, or ``None`` when another receipt was already
+        there.
+        """
+
+        row = self._vault_receipt_row(session_id, **fields)
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            found = conn.execute(
+                "SELECT 1 FROM vault_receipts "
+                "WHERE session_id = ? AND cause != ? LIMIT 1",
+                (session_id, exclude_cause),
+            ).fetchone()
+            if found is not None:
+                return None
+            return self._insert_vault_receipt(conn, row)
+
+    def _vault_receipt_row(
+        self,
+        session_id: str,
+        *,
+        cause: str,
+        vault_revision: str,
+        payload_digest: str,
+        notes_selected: int,
+        head_chars: int,
+        chars_emitted: int,
+        chars_omitted: int,
+        disposition: str,
+        reason_code: str | None = None,
+    ) -> tuple[Any, ...]:
+        """Validate one vault receipt and return its row values."""
+
         self.ensure_current_schema()
         if cause not in VAULT_CAUSES:
             raise ValueError("unknown vault cause")
@@ -1558,30 +1612,33 @@ class Store:
         for value in (notes_selected, head_chars, chars_emitted, chars_omitted):
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError("vault receipt counts must be non-negative integers")
-        with self.connect() as conn:
-            cursor = conn.execute(
-                """
-                INSERT INTO vault_receipts(
-                    session_id, cause, vault_revision, payload_digest,
-                    notes_selected, head_chars, chars_emitted, chars_omitted,
-                    disposition, reason_code, recorded_at
-                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    session_id,
-                    cause,
-                    vault_revision,
-                    payload_digest,
-                    notes_selected,
-                    head_chars,
-                    chars_emitted,
-                    chars_omitted,
-                    disposition,
-                    reason_code,
-                    utc_now(),
-                ),
-            )
-            return int(cursor.lastrowid)
+        return (
+            session_id,
+            cause,
+            vault_revision,
+            payload_digest,
+            notes_selected,
+            head_chars,
+            chars_emitted,
+            chars_omitted,
+            disposition,
+            reason_code,
+            utc_now(),
+        )
+
+    @staticmethod
+    def _insert_vault_receipt(conn: sqlite3.Connection, row: tuple[Any, ...]) -> int:
+        cursor = conn.execute(
+            """
+            INSERT INTO vault_receipts(
+                session_id, cause, vault_revision, payload_digest,
+                notes_selected, head_chars, chars_emitted, chars_omitted,
+                disposition, reason_code, recorded_at
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            row,
+        )
+        return int(cursor.lastrowid)
 
     def latest_vault_delivery(self, session_id: str) -> dict[str, Any] | None:
         """Return the newest receipt that put vault context into the session."""
@@ -1614,6 +1671,32 @@ class Store:
         with self.connect() as conn:
             row = conn.execute(f"{query} LIMIT 1", params).fetchone()
         return row is not None
+
+    def vault_compaction_due(self, session_id: str) -> bool:
+        """Return whether a compaction still needs its vault delivery.
+
+        Hosts send different events after a compaction, so each compaction is
+        counted by its ``PreCompact`` event. A compaction is handled once a
+        compact receipt emitted context or reported why it could not. With no
+        ``PreCompact`` event at all, every compaction is due.
+        """
+
+        self.ensure_current_schema()
+        handled = (*VAULT_EMITTED, "degraded", "withheld")
+        with self.connect() as conn:
+            row = conn.execute(
+                f"""
+                SELECT
+                    (SELECT COUNT(*) FROM events
+                      WHERE session_id = ? AND event_name = 'PreCompact'),
+                    (SELECT COUNT(*) FROM vault_receipts
+                      WHERE session_id = ? AND cause = 'compact'
+                        AND disposition IN ({_sql_choices(handled)}))
+                """,
+                (session_id, session_id),
+            ).fetchone()
+        compactions, delivered = int(row[0]), int(row[1])
+        return compactions == 0 or compactions > delivered
 
     def vault_summary(
         self, days: int = 30, *, session_id: str | None = None
