@@ -25,6 +25,7 @@ from agent_efficiency.verification.receipts import receipt_state
 from agent_efficiency.verification.state import workspace_state
 from agent_efficiency.policy import PolicyPack, classify_task, classify_tool
 from agent_efficiency.store import Store, project_identity
+from agent_efficiency.vault_delivery import deliver_vault_context, session_cause
 
 
 CONTROL_RE = re.compile(
@@ -202,7 +203,24 @@ def _run_hook(
         except (OSError, ValueError, sqlite3.Error):
             # Measurement is optional and cannot make startup fail.
             pass
-        if host == "cursor" and mode in {"advise", "guard"}:
+        lead = (
+            CURSOR_SESSION_CONTEXT
+            if host == "cursor" and mode in {"advise", "guard"}
+            else ""
+        )
+        delivery = deliver_vault_context(
+            active_store,
+            session_id,
+            host,
+            event,
+            Path(cwd),
+            cause=session_cause(payload),
+            mode=mode,
+            lead=lead,
+        )
+        if delivery.output:
+            return delivery.output
+        if lead:
             return {"additional_context": CURSOR_SESSION_CONTEXT}
         return None
     if event == "PreToolUse":

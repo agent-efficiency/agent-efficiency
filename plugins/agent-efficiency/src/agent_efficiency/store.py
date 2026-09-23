@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from contextlib import closing, contextmanager
 from datetime import UTC, datetime, timedelta
@@ -14,13 +15,74 @@ from agent_efficiency.models import VALID_MODES
 from agent_efficiency.paths import RuntimePaths
 
 
-SCHEMA_VERSION = "6"
+SCHEMA_VERSION = "7"
 INTERVENTION_EVENT_WINDOW = 8
 MAX_NUDGES_PER_TURN = 3
 MAX_NUDGES_PER_SESSION = 8
 MAX_KNOWLEDGE_ENVELOPES_PER_SESSION = 4
 MAX_KNOWLEDGE_CHARS_PER_ENVELOPE = 500
 MAX_KNOWLEDGE_CHARS_PER_SESSION = 2000
+
+# The vault receipt is a closed schema. Every text column is a fixed code or a
+# digest, so a vault path, note id, title, hook, remote, or branch cannot be
+# stored even by mistake.
+VAULT_CAUSES = ("new", "resume", "compact", "request", "deferred")
+VAULT_DISPOSITIONS = (
+    "delivered",
+    "truncated",
+    "deferred",
+    "unavailable",
+    "degraded",
+    "skipped",
+    "withheld",
+)
+VAULT_REASONS = (
+    "no_match",
+    "unmapped",
+    "ambiguous",
+    "over_budget",
+    "host_limit",
+    "host_unsupported",
+    "parse_error",
+    "timeout",
+    "no_trees",
+    "unchanged",
+    "observe_mode",
+    "cap_exceeded",
+    "cap_refused",
+    "cap_allowed_indeterminate",
+)
+VAULT_EMITTED = ("delivered", "truncated", "deferred")
+_VAULT_DIGEST = re.compile(r"^[0-9a-f]{16}$")
+
+
+def _sql_choices(values: tuple[str, ...]) -> str:
+    return ", ".join(f"'{value}'" for value in values)
+
+
+VAULT_RECEIPTS_SQL = f"""
+CREATE TABLE IF NOT EXISTS vault_receipts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    cause TEXT NOT NULL CHECK(cause IN ({_sql_choices(VAULT_CAUSES)})),
+    vault_revision TEXT NOT NULL CHECK(length(vault_revision) = 16),
+    payload_digest TEXT NOT NULL CHECK(length(payload_digest) = 16),
+    notes_selected INTEGER NOT NULL CHECK(notes_selected >= 0),
+    head_chars INTEGER NOT NULL CHECK(head_chars >= 0),
+    chars_emitted INTEGER NOT NULL CHECK(chars_emitted >= 0),
+    chars_omitted INTEGER NOT NULL CHECK(chars_omitted >= 0),
+    disposition TEXT NOT NULL
+        CHECK(disposition IN ({_sql_choices(VAULT_DISPOSITIONS)})),
+    reason_code TEXT
+        CHECK(reason_code IS NULL OR reason_code IN ({_sql_choices(VAULT_REASONS)})),
+    recorded_at TEXT NOT NULL,
+    FOREIGN KEY(session_id) REFERENCES sessions(session_id)
+);
+CREATE INDEX IF NOT EXISTS vault_receipts_session
+    ON vault_receipts(session_id, id DESC);
+CREATE INDEX IF NOT EXISTS vault_receipts_recorded
+    ON vault_receipts(recorded_at);
+"""
 
 
 def utc_now() -> str:
@@ -414,6 +476,7 @@ class Store:
                 );
                 """
             )
+            conn.executescript(VAULT_RECEIPTS_SQL)
             conn.execute(
                 "INSERT OR IGNORE INTO settings(key, value) VALUES('schema_version', ?)",
                 (SCHEMA_VERSION,),
@@ -428,7 +491,7 @@ class Store:
                 "SELECT value FROM settings WHERE key = 'schema_version'"
             ).fetchone()
             version = str(row["value"]) if row else "1"
-            if version not in {"1", "2", "3", "4", "5", SCHEMA_VERSION}:
+            if version not in {"1", "2", "3", "4", "5", "6", SCHEMA_VERSION}:
                 raise ValueError(f"unsupported data schema version: {version}")
             if version != SCHEMA_VERSION:
                 backup_path = self.paths.database.with_name(
@@ -734,6 +797,8 @@ class Store:
                     );
                     """
                 )
+            if version in {"1", "2", "3", "4", "5", "6"}:
+                conn.executescript(VAULT_RECEIPTS_SQL)
             outcome_columns = {
                 str(column["name"])
                 for column in conn.execute("PRAGMA table_info(session_outcomes)")
@@ -763,7 +828,7 @@ class Store:
                 "SELECT value FROM settings WHERE key = 'schema_version'"
             ).fetchone()
         version = str(row["value"]) if row else "1"
-        supported = version in {"1", "2", "3", "4", "5", SCHEMA_VERSION}
+        supported = version in {"1", "2", "3", "4", "5", "6", SCHEMA_VERSION}
         backup = self.paths.database.with_name(
             f"{self.paths.database.name}.schema-{version}.bak"
         )
@@ -1460,6 +1525,141 @@ class Store:
                 ),
             )
             return int(cursor.lastrowid)
+
+    def record_vault_receipt(
+        self,
+        session_id: str,
+        *,
+        cause: str,
+        vault_revision: str,
+        payload_digest: str,
+        notes_selected: int,
+        head_chars: int,
+        chars_emitted: int,
+        chars_omitted: int,
+        disposition: str,
+        reason_code: str | None = None,
+    ) -> int:
+        """Record one vault delivery decision as counts, digests, and codes."""
+
+        self.ensure_current_schema()
+        if cause not in VAULT_CAUSES:
+            raise ValueError("unknown vault cause")
+        if disposition not in VAULT_DISPOSITIONS:
+            raise ValueError("unknown vault disposition")
+        if reason_code is not None and reason_code not in VAULT_REASONS:
+            raise ValueError("unknown vault reason code")
+        for name, value in (
+            ("vault_revision", vault_revision),
+            ("payload_digest", payload_digest),
+        ):
+            if not isinstance(value, str) or not _VAULT_DIGEST.match(value):
+                raise ValueError(f"{name} must be a 16 character hex digest")
+        for value in (notes_selected, head_chars, chars_emitted, chars_omitted):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError("vault receipt counts must be non-negative integers")
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO vault_receipts(
+                    session_id, cause, vault_revision, payload_digest,
+                    notes_selected, head_chars, chars_emitted, chars_omitted,
+                    disposition, reason_code, recorded_at
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    cause,
+                    vault_revision,
+                    payload_digest,
+                    notes_selected,
+                    head_chars,
+                    chars_emitted,
+                    chars_omitted,
+                    disposition,
+                    reason_code,
+                    utc_now(),
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def latest_vault_delivery(self, session_id: str) -> dict[str, Any] | None:
+        """Return the newest receipt that put vault context into the session."""
+
+        self.ensure_current_schema()
+        with self.connect() as conn:
+            row = conn.execute(
+                f"""
+                SELECT vault_revision, payload_digest, disposition, cause
+                  FROM vault_receipts
+                 WHERE session_id = ?
+                   AND disposition IN ({_sql_choices(VAULT_EMITTED)})
+                 ORDER BY id DESC LIMIT 1
+                """,
+                (session_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def has_vault_receipt(self, session_id: str) -> bool:
+        self.ensure_current_schema()
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM vault_receipts WHERE session_id = ? LIMIT 1",
+                (session_id,),
+            ).fetchone()
+        return row is not None
+
+    def vault_summary(
+        self, days: int = 30, *, session_id: str | None = None
+    ) -> dict[str, Any]:
+        """Report selected, emitted, deferred, and unavailable separately."""
+
+        self.ensure_current_schema()
+        since = (
+            (datetime.now(UTC) - timedelta(days=max(1, days)))
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+        clause = "recorded_at >= ?"
+        params: list[Any] = [since]
+        if session_id:
+            clause += " AND session_id = ?"
+            params.append(session_id)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT disposition, reason_code, notes_selected, head_chars,
+                       chars_emitted, chars_omitted
+                  FROM vault_receipts
+                 WHERE {clause}
+                """,
+                params,
+            ).fetchall()
+        emitted = [row for row in rows if row["disposition"] in VAULT_EMITTED]
+        reasons: dict[str, int] = {}
+        for row in rows:
+            if row["reason_code"]:
+                reasons[row["reason_code"]] = reasons.get(row["reason_code"], 0) + 1
+
+        def count(disposition: str) -> int:
+            return sum(1 for row in rows if row["disposition"] == disposition)
+
+        return {
+            "receipts": len(rows),
+            "selected": sum(1 for row in rows if int(row["notes_selected"]) > 0),
+            "emitted": len(emitted),
+            "chars_emitted": sum(int(row["chars_emitted"]) for row in emitted),
+            "head_chars": sum(int(row["head_chars"]) for row in emitted),
+            "chars_omitted": sum(int(row["chars_omitted"]) for row in rows),
+            "truncated": count("truncated"),
+            "deferred": count("deferred"),
+            "unavailable": count("unavailable"),
+            "degraded": count("degraded"),
+            "skipped": count("skipped"),
+            "withheld": count("withheld"),
+            "reasons": dict(sorted(reasons.items())),
+        }
 
     def record_intervention_outcome(
         self, session_id: str, turn_key: str, outcome: str

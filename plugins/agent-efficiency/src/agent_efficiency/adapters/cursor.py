@@ -40,6 +40,7 @@ class CursorAdapter(BaseAdapter):
         "preCompact": ("add_context",),
         "stop": ("continue_turn",),
         # The shared runtime uses normalized event names after input parsing.
+        "SessionStart": ("add_context",),
         "PreToolUse": ("deny_action",),
         "PostToolUse": ("add_context",),
         "PostToolUseFailure": ("add_context",),

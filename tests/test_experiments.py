@@ -629,7 +629,7 @@ class ExperimentTests(unittest.TestCase):
         migrated = Store(self.temp.name)
         self.assertIsNone(get_enrollment(migrated, "existing-session"))
         self.assertIsNotNone(migrated.get_session("existing-session"))
-        self.assertEqual(migrated.get_setting("schema_version"), "6")
+        self.assertEqual(migrated.get_setting("schema_version"), "7")
 
     def test_cli_enrollment_outcome_and_evaluation_are_machine_readable(self) -> None:
         self.store.ensure_session(

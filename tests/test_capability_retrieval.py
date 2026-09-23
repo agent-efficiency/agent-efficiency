@@ -383,7 +383,7 @@ class CapabilityRetrievalTests(unittest.TestCase):
                     "SELECT name FROM sqlite_master WHERE type = 'table'"
                 )
             }
-        self.assertEqual(version, "6")
+        self.assertEqual(version, "7")
         self.assertIn("knowledge_receipts", tables)
         self.assertIn("session_capability_packs", tables)
         self.assertIn("interventions", tables)

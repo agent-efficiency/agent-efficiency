@@ -174,9 +174,9 @@ command = ["python", "-V"]
             conn.execute("UPDATE settings SET value = '3' WHERE key = 'schema_version'")
         status = self.store.migration_status()
         self.assertTrue(status["migration_required"])
-        self.assertEqual(status["target_schema"], "6")
+        self.assertEqual(status["target_schema"], "7")
         self.store.ensure_current_schema()
-        self.assertEqual(self.store.get_setting("schema_version"), "6")
+        self.assertEqual(self.store.get_setting("schema_version"), "7")
         self.assertEqual(
             self.store.get_session("session-1")["evidence_version"],
             "legacy-observation",
