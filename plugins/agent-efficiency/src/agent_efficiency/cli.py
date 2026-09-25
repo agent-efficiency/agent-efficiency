@@ -825,11 +825,15 @@ def _host_package_status() -> dict[str, dict[str, Any]]:
         ),
         "codex": (
             PLUGIN_ROOT / ".codex-plugin" / "plugin.json",
-            PLUGIN_ROOT / "hooks" / "hooks.json",
+            PLUGIN_ROOT / "hooks" / "codex-hooks.json",
             CODEX_EVENTS,
             "${PLUGIN_ROOT}",
         ),
     }
+    # Claude Code loads hooks/hooks.json in addition to the file its manifest
+    # names. A copy left over from an older release runs there with an empty
+    # plugin root and fails on every event.
+    stale_default_hooks = PLUGIN_ROOT / "hooks" / "hooks.json"
     result: dict[str, dict[str, Any]] = {}
     for host, (
         manifest_path,
@@ -837,9 +841,15 @@ def _host_package_status() -> dict[str, dict[str, Any]]:
         expected_events,
         root_variable,
     ) in specs.items():
+        expected_hooks = f"./{hooks_path.relative_to(PLUGIN_ROOT).as_posix()}"
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            manifest_ready = manifest.get("name") == "agent-efficiency"
+            # The manifest must name this host's hook file. Without it, a host
+            # falls back to the default hooks/hooks.json, which is not shipped.
+            manifest_ready = (
+                manifest.get("name") == "agent-efficiency"
+                and manifest.get("hooks") == expected_hooks
+            )
         except (OSError, ValueError, json.JSONDecodeError):
             manifest_ready = False
         try:
@@ -868,6 +878,22 @@ def _host_package_status() -> dict[str, dict[str, Any]]:
             "continue_turn",
             "replace_action",
         }
+        not_ready_reasons: list[str] = []
+        if not manifest_ready:
+            not_ready_reasons.append(
+                f"{manifest_path.relative_to(PLUGIN_ROOT).as_posix()} must be "
+                f"named agent-efficiency and set hooks to {expected_hooks}"
+            )
+        if not hooks_ready:
+            not_ready_reasons.append(
+                f"{expected_hooks} must list the {host} events and use {root_variable}"
+            )
+        if host == "claude" and stale_default_hooks.exists():
+            not_ready_reasons.append(
+                "remove the stale default hook file hooks/hooks.json: Claude "
+                "Code runs it in addition to its own hook file, with an empty "
+                "plugin root"
+            )
         result[host] = {
             "cli_version": _tool_version(host),
             "manifest_ready": manifest_ready,
@@ -877,7 +903,8 @@ def _host_package_status() -> dict[str, dict[str, Any]]:
             "unsupported_capabilities": sorted(
                 all_effect_capabilities - set(supported_capabilities)
             ),
-            "ready": manifest_ready and hooks_ready,
+            "ready": not not_ready_reasons,
+            "not_ready_reasons": not_ready_reasons,
         }
     return result
 

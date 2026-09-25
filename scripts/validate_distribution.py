@@ -41,6 +41,14 @@ TEXT_SUFFIXES = {
     ".yml",
 }
 RUNTIME_LIMIT_BYTES = 600 * 1024
+# Each host manifest must name its own hook file. Claude Code loads a plugin's
+# default hooks/hooks.json in addition to the file its manifest names, so the
+# package must not ship that default file for any host.
+HOST_HOOK_FILES = {
+    "claude": "./hooks/claude-hooks.json",
+    "codex": "./hooks/codex-hooks.json",
+    "cursor": "./hooks/cursor-hooks.json",
+}
 
 
 def validate_distribution(root: Path = ROOT) -> dict[str, Any]:
@@ -140,10 +148,22 @@ def validate_distribution(root: Path = ROOT) -> dict[str, Any]:
     if claude_marketplace.get("version") != project_version:
         errors.append("Claude marketplace version differs")
 
-    codex_hooks = (PLUGIN / "hooks" / "codex-hooks.json").read_bytes()
-    compatibility_hooks = (PLUGIN / "hooks" / "hooks.json").read_bytes()
-    if codex_hooks != compatibility_hooks:
-        errors.append("Codex hook manifests differ")
+    default_hooks = PLUGIN / "hooks" / "hooks.json"
+    if default_hooks.exists():
+        errors.append(
+            f"{default_hooks}: remove this file. Claude Code loads the default "
+            "hooks/hooks.json in addition to the hooks its manifest names, "
+            "so no host may use it."
+        )
+    for host, hook_file in HOST_HOOK_FILES.items():
+        manifest_path = manifest_paths[host]
+        if manifests[host].get("hooks") != hook_file:
+            errors.append(
+                f"{manifest_path}: hooks must be {hook_file!r} so {host} "
+                "loads only its own hook file"
+            )
+        elif not (PLUGIN / hook_file).is_file():
+            errors.append(f"{manifest_path}: hook file {hook_file!r} is missing")
 
     pack = load_bundled_capability_pack()
     policies = PolicyPack.load(root / ".validation-data")

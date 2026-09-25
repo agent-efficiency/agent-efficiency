@@ -10,6 +10,7 @@
   "repository": "https://github.com/agent-efficiency/agent-efficiency",
   "license": "MIT",
   "skills": "./skills/",
+  "hooks": "./hooks/codex-hooks.json",
   "interface": {
     "displayName": "Agent Efficiency",
     "shortDescription": "Verify changes and reduce coding-agent waste.",

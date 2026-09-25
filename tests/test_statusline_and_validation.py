@@ -3,14 +3,25 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from agent_efficiency import cli as runtime_cli
 from agent_efficiency.cli import main
+from agent_efficiency.paths import PLUGIN_ROOT
 from agent_efficiency.statusline import process_statusline
 from agent_efficiency.store import Store
+from scripts import validate_distribution as validation
 from scripts.validate_distribution import validate_distribution
+
+HOST_HOOK_FILES = {
+    "claude": "./hooks/claude-hooks.json",
+    "codex": "./hooks/codex-hooks.json",
+    "cursor": "./hooks/cursor-hooks.json",
+}
 
 
 class StatuslineTests(unittest.TestCase):
@@ -164,6 +175,147 @@ class DistributionValidationTests(unittest.TestCase):
             self.assertTrue(host["manifest_ready"])
             self.assertTrue(host["hooks_ready"])
             self.assertGreater(host["event_count"], 0)
+
+
+class HostHookFileTests(unittest.TestCase):
+    """Each host must load only its own hook file.
+
+    Claude Code loads a plugin's default hooks/hooks.json in addition to the
+    file its manifest names. A Codex command in that default file then runs
+    under Claude Code with an empty ${PLUGIN_ROOT} and fails on every event.
+    """
+
+    def _plugin_copy(self, temp: str) -> Path:
+        target = Path(temp) / "repo" / "plugins" / "agent-efficiency"
+        shutil.copytree(
+            PLUGIN_ROOT,
+            target,
+            ignore=shutil.ignore_patterns(
+                "__pycache__", "*.pyc", "*.pyo", "*.egg-info"
+            ),
+        )
+        (target / "hooks" / "hooks.json").unlink(missing_ok=True)
+        for host, hook_file in HOST_HOOK_FILES.items():
+            self._set_manifest_hooks(target, host, hook_file)
+        return target
+
+    @staticmethod
+    def _set_manifest_hooks(plugin: Path, host: str, value: str | None) -> None:
+        path = plugin / f".{host}-plugin" / "plugin.json"
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        if value is None:
+            manifest.pop("hooks", None)
+        else:
+            manifest["hooks"] = value
+        path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+    @staticmethod
+    def _hook_errors(plugin: Path) -> list[str]:
+        with mock.patch.object(validation, "PLUGIN", plugin):
+            errors = validate_distribution()["errors"]
+        return [error for error in errors if "hooks" in error]
+
+    def test_shipped_package_names_each_host_hook_file(self) -> None:
+        self.assertFalse((PLUGIN_ROOT / "hooks" / "hooks.json").exists())
+        for host, hook_file in HOST_HOOK_FILES.items():
+            manifest = json.loads(
+                (PLUGIN_ROOT / f".{host}-plugin" / "plugin.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(manifest.get("hooks"), hook_file, host)
+            self.assertTrue((PLUGIN_ROOT / hook_file).is_file(), host)
+
+    def test_validation_accepts_host_specific_hook_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            plugin = self._plugin_copy(temp)
+            self.assertEqual(self._hook_errors(plugin), [])
+
+    def test_validation_rejects_default_hook_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            plugin = self._plugin_copy(temp)
+            shutil.copyfile(
+                plugin / "hooks" / "codex-hooks.json",
+                plugin / "hooks" / "hooks.json",
+            )
+            errors = self._hook_errors(plugin)
+        self.assertTrue(
+            any(
+                "hooks.json" in error and "Claude Code loads" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_validation_requires_codex_manifest_to_name_codex_hooks(self) -> None:
+        for value in (None, "./hooks/hooks.json", "./hooks/claude-hooks.json"):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as temp:
+                plugin = self._plugin_copy(temp)
+                self._set_manifest_hooks(plugin, "codex", value)
+                errors = self._hook_errors(plugin)
+                self.assertTrue(
+                    any(
+                        ".codex-plugin" in error and "./hooks/codex-hooks.json" in error
+                        for error in errors
+                    ),
+                    errors,
+                )
+
+    def test_validation_requires_each_host_manifest_to_name_its_hooks(
+        self,
+    ) -> None:
+        for host, hook_file in HOST_HOOK_FILES.items():
+            with self.subTest(host=host), tempfile.TemporaryDirectory() as temp:
+                plugin = self._plugin_copy(temp)
+                self._set_manifest_hooks(plugin, host, "./hooks/other-hooks.json")
+                errors = self._hook_errors(plugin)
+                self.assertTrue(
+                    any(
+                        f".{host}-plugin" in error and hook_file in error
+                        for error in errors
+                    ),
+                    errors,
+                )
+
+    def test_doctor_reads_codex_hook_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            plugin = self._plugin_copy(temp)
+            with mock.patch.object(runtime_cli, "PLUGIN_ROOT", plugin):
+                status = runtime_cli._host_package_status()
+        self.assertTrue(status["codex"]["manifest_ready"])
+        self.assertTrue(status["codex"]["hooks_ready"])
+        self.assertTrue(status["codex"]["ready"])
+
+    def test_doctor_rejects_codex_manifest_without_its_hook_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            plugin = self._plugin_copy(temp)
+            self._set_manifest_hooks(plugin, "codex", None)
+            with mock.patch.object(runtime_cli, "PLUGIN_ROOT", plugin):
+                status = runtime_cli._host_package_status()
+        self.assertFalse(status["codex"]["manifest_ready"])
+        self.assertFalse(status["codex"]["ready"])
+
+    def test_doctor_flags_stale_default_hook_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            plugin = self._plugin_copy(temp)
+            shutil.copyfile(
+                plugin / "hooks" / "codex-hooks.json",
+                plugin / "hooks" / "hooks.json",
+            )
+            with (
+                mock.patch.object(runtime_cli, "PLUGIN_ROOT", plugin),
+                contextlib.redirect_stdout(io.StringIO()) as output,
+            ):
+                main(["--data-dir", temp, "doctor", "--json"])
+        doctor = json.loads(output.getvalue())
+        self.assertFalse(doctor["ok"])
+        self.assertFalse(doctor["host_packages_ready"])
+        claude = doctor["hosts"]["claude"]
+        self.assertFalse(claude["ready"])
+        reasons = " ".join(claude["not_ready_reasons"])
+        self.assertIn("hooks/hooks.json", reasons)
+        self.assertIn("remove", reasons)
+        self.assertIn("empty plugin root", reasons)
 
 
 if __name__ == "__main__":

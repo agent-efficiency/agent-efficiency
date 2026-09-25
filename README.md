@@ -122,8 +122,10 @@ The repository contains a Codex marketplace at
 install Agent Efficiency, and start a new session. Use `/hooks` to inspect and
 trust the bundled command hook.
 
-The canonical Codex hook manifest is
-`plugins/agent-efficiency/hooks/codex-hooks.json`.
+The Codex manifest names `plugins/agent-efficiency/hooks/codex-hooks.json`.
+Each host manifest names its own hook file. The package ships no
+`hooks/hooks.json` because Claude Code loads that default file in addition to
+the file its manifest names.
 
 ## Configure verification
 
