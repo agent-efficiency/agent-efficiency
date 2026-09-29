@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Mapping
 
 
 PACKAGE_DIR = Path(__file__).resolve().parent
@@ -64,23 +65,42 @@ def is_private(path: Path) -> bool:
         return True
 
 
-def data_dir(explicit: str | Path | None = None) -> Path:
+def data_dir(
+    explicit: str | Path | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> Path:
     """Return the writable persistent data directory.
 
-    Plugin-provided directories take precedence over the generic XDG fallback,
-    while AGENT_EFFICIENCY_DATA is an explicit operator override useful for
-    testing and standalone installs.
+    One folder serves every host and the terminal command: the explicit
+    folder when given, else AGENT_EFFICIENCY_DATA, else
+    $XDG_DATA_HOME/agent-efficiency, else ~/.local/share/agent-efficiency.
+    Host plugin data variables do not choose it; see host_data for the
+    one-time copy of a store that an earlier release kept there.
     """
 
     if explicit is not None:
         return Path(explicit).expanduser().resolve()
-    for key in ("AGENT_EFFICIENCY_DATA", "CLAUDE_PLUGIN_DATA", "PLUGIN_DATA"):
-        value = os.environ.get(key)
-        if value:
-            return Path(value).expanduser().resolve()
-    xdg = os.environ.get("XDG_DATA_HOME")
-    base = Path(xdg).expanduser() if xdg else Path.home() / ".local" / "share"
+    env = os.environ if environ is None else environ
+    value = env.get("AGENT_EFFICIENCY_DATA")
+    if value:
+        return Path(value).expanduser().resolve()
+    xdg = env.get("XDG_DATA_HOME")
+    if xdg:
+        base = Path(xdg).expanduser()
+    else:
+        home = env.get("HOME")
+        base = (Path(home) if home else Path.home()) / ".local" / "share"
     return (base / "agent-efficiency").resolve()
+
+
+def data_dir_is_chosen(
+    explicit: str | Path | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> bool:
+    """Whether the data folder was named by a flag or AGENT_EFFICIENCY_DATA."""
+
+    env = os.environ if environ is None else environ
+    return explicit is not None or bool(env.get("AGENT_EFFICIENCY_DATA"))
 
 
 class RuntimePaths:

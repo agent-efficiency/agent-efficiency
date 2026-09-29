@@ -11,6 +11,7 @@ from pathlib import Path
 
 from agent_efficiency.cli import main
 from agent_efficiency.store import Store
+from tests.test_doctor import isolated_home
 from tests.vault_fixtures import make_vault_tree
 
 
@@ -76,7 +77,10 @@ class DataPermissionTests(unittest.TestCase):
             os.chmod(root, 0o755)
             Store(root)
             self.assertEqual(mode(root), 0o755)
-            with contextlib.redirect_stdout(io.StringIO()) as output:
+            with (
+                isolated_home(temp),
+                contextlib.redirect_stdout(io.StringIO()) as output,
+            ):
                 main(["--data-dir", str(root), "doctor", "--json"])
             doctor = json.loads(output.getvalue())
             self.assertFalse(doctor["data_dir_private"])
@@ -86,7 +90,10 @@ class DataPermissionTests(unittest.TestCase):
     def test_private_store_is_reported_private(self) -> None:
         with tempfile.TemporaryDirectory() as temp, umask(0o022):
             root = Path(temp) / "data"
-            with contextlib.redirect_stdout(io.StringIO()) as output:
+            with (
+                isolated_home(temp),
+                contextlib.redirect_stdout(io.StringIO()) as output,
+            ):
                 main(["--data-dir", str(root), "doctor", "--json"])
             doctor = json.loads(output.getvalue())
             self.assertTrue(doctor["data_dir_private"])

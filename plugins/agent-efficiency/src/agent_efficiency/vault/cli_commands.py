@@ -2,7 +2,9 @@
 
 No vault command touches the database, so the group is dispatched before the
 store is built. That keeps ``vault check`` usable from a git hook on a machine
-where the runtime data directory is missing or unwritable.
+where the runtime data directory is missing or unwritable. ``register`` and
+``show`` read the data folder, so they first let an older host store be
+copied into it; see ``host_data``.
 
 Exit codes:
 
@@ -23,7 +25,7 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from agent_efficiency.paths import data_dir
+from agent_efficiency.host_data import settle_data_dir
 from agent_efficiency.vault import gitcontent
 from agent_efficiency.vault.config import (
     VaultConfigError,
@@ -537,7 +539,7 @@ def _permissions(bits: int) -> int:
 
 
 def _register(args: argparse.Namespace) -> int:
-    root = data_dir(args.data_dir)
+    root = settle_data_dir(args.data_dir, discover=True)
     try:
         stale = stale_entries(root)
         tree = register_tree(root, Path(args.root))
@@ -551,7 +553,7 @@ def _register(args: argparse.Namespace) -> int:
 
 def _show(args: argparse.Namespace) -> int:
     cwd = Path(args.cwd or os.getcwd())
-    root = data_dir(args.data_dir)
+    root = settle_data_dir(args.data_dir, discover=True)
     prepared = prepare(cwd, root)
     if prepared.status != "ready":
         print(f"No vault context: {prepared.status} ({prepared.reason}).")

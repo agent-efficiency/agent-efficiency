@@ -40,6 +40,12 @@ def isolated_environment(home: Path) -> dict[str, str]:
     return environment
 
 
+def isolated_home(home: str | Path):
+    """Point every host location at ``home`` for the duration of a test."""
+
+    return mock.patch.dict(os.environ, isolated_environment(Path(home)), clear=True)
+
+
 class DoctorTextTests(unittest.TestCase):
     def test_plain_doctor_runs_end_to_end(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -68,7 +74,7 @@ class DoctorTextTests(unittest.TestCase):
     def test_text_keys_are_all_produced_by_doctor(self) -> None:
         with (
             tempfile.TemporaryDirectory() as temp,
-            mock.patch.dict(os.environ, isolated_environment(Path(temp)), clear=True),
+            isolated_home(temp),
         ):
             result = runtime_cli._doctor(Store(Path(temp) / "data"))
         missing = [key for key in runtime_cli.DOCTOR_TEXT_KEYS if key not in result]
@@ -81,7 +87,7 @@ class DoctorTextTests(unittest.TestCase):
     def test_text_doctor_exit_code_follows_ok(self) -> None:
         with (
             tempfile.TemporaryDirectory() as temp,
-            mock.patch.dict(os.environ, isolated_environment(Path(temp)), clear=True),
+            isolated_home(temp),
             contextlib.redirect_stdout(io.StringIO()) as output,
         ):
             code = main(["--data-dir", str(Path(temp) / "data"), "doctor"])

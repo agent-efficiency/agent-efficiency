@@ -17,6 +17,7 @@ from agent_efficiency.statusline import process_statusline
 from agent_efficiency.store import Store
 from scripts import validate_distribution as validation
 from scripts.validate_distribution import validate_distribution
+from tests.test_doctor import isolated_home
 
 FORBIDDEN_TERM = " ".join(("personal", "project"))
 HOME_PATH = "/".join(("", "home", "someone", ""))
@@ -209,6 +210,7 @@ class DistributionValidationTests(unittest.TestCase):
     def test_doctor_reports_verified_first_party_pack(self) -> None:
         with (
             tempfile.TemporaryDirectory() as temp,
+            isolated_home(temp),
             contextlib.redirect_stdout(io.StringIO()) as output,
         ):
             self.assertEqual(
@@ -229,6 +231,7 @@ class DistributionValidationTests(unittest.TestCase):
     def test_doctor_reports_all_native_host_packages(self) -> None:
         with (
             tempfile.TemporaryDirectory() as temp,
+            isolated_home(temp),
             contextlib.redirect_stdout(io.StringIO()) as output,
         ):
             self.assertEqual(
@@ -374,6 +377,7 @@ class HostHookFileTests(unittest.TestCase):
             )
             with (
                 mock.patch.object(runtime_cli, "PLUGIN_ROOT", plugin),
+                isolated_home(temp),
                 contextlib.redirect_stdout(io.StringIO()) as output,
             ):
                 main(["--data-dir", temp, "doctor", "--json"])

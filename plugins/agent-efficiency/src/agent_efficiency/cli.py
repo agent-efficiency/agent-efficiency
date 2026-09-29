@@ -26,6 +26,7 @@ from agent_efficiency.capability_retrieval import (
     explain_capability,
 )
 from agent_efficiency.hook import format_session_status
+from agent_efficiency.host_data import settle_data_dir, unused_host_stores
 from agent_efficiency.models import VALID_MODES
 from agent_efficiency.paths import PLUGIN_ROOT, is_private
 from agent_efficiency.policy import PolicyPack
@@ -289,7 +290,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         # No vault command reads the database, so dispatch before the store is
         # built. A git hook must still work when the data directory does not.
         return vault_commands.dispatch(args)
-    store = Store(args.data_dir)
+    store = Store(settle_data_dir(args.data_dir, discover=True))
     if args.command in {"on", "off", "observe", "advise", "guard", "mode"}:
         return _mode(args, store)
     if args.command == "status":
@@ -477,7 +478,8 @@ def _statusline(args: argparse.Namespace) -> int:
         payload = json.load(sys.stdin)
         if not isinstance(payload, dict):
             raise ValueError("status input must be an object")
-        print(process_statusline(payload, Store(args.data_dir)))
+        store = Store(settle_data_dir(args.data_dir, discover=True))
+        print(process_statusline(payload, store))
     except Exception:
         print("AE unavailable")
     return 0
@@ -947,6 +949,7 @@ def _doctor(store: Store) -> dict[str, Any]:
                 f"private, run: chmod -R go-rwx {store.paths.root}"
             )
         ),
+        "unused_data_dirs": unused_host_stores(store.paths.root, os.environ),
         "database": str(store.paths.database),
         "database_ready": store.paths.database.is_file(),
         "default_mode": store.default_mode(),
@@ -1003,6 +1006,7 @@ DOCTOR_TEXT_KEYS = (
     "python",
     "data_dir",
     "data_dir_permissions",
+    "unused_data_dirs",
     "database",
     "default_mode",
     "active_policy_count",
