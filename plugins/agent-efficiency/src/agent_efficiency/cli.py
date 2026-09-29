@@ -983,36 +983,35 @@ def _tool_version(command: str) -> str | None:
     return output[0] if output else None
 
 
+# The keys the text form of doctor prints, in order. Every key here must be one
+# that _doctor returns; a test holds that true.
+DOCTOR_TEXT_KEYS = (
+    "runtime_version",
+    "python",
+    "data_dir",
+    "database",
+    "default_mode",
+    "active_policy_count",
+    "embedded_capability_pack_ready",
+    "embedded_capability_pack_id",
+    "embedded_capability_pack_sequence",
+    "embedded_capability_pack_card_count",
+    "embedded_capability_pack_digest",
+    "claude",
+    "cursor",
+    "codex",
+    "host_packages_ready",
+    "hosts",
+    "fetch_observation_limit",
+    "privacy",
+)
+
+
 def _format_doctor(result: dict[str, Any]) -> str:
     lines = [f"Agent Efficiency doctor: {'OK' if result['ok'] else 'FAILED'}"]
-    for key in (
-        "runtime_version",
-        "python",
-        "data_dir",
-        "database",
-        "default_mode",
-        "active_policy_count",
-        "embedded_capability_pack_ready",
-        "embedded_capability_pack_id",
-        "embedded_capability_pack_sequence",
-        "embedded_capability_pack_card_count",
-        "embedded_capability_pack_digest",
-        "installation_capability_pack_id",
-        "installation_capability_pack_sequence",
-        "installation_capability_pack_digest",
-        "foreground_upgrade_available",
-        "automatic_upgrade_available",
-        "automatic_upgrade_reason",
-        "last_upgrade_error_class",
-        "claude",
-        "cursor",
-        "codex",
-        "host_packages_ready",
-        "hosts",
-        "fetch_observation_limit",
-        "privacy",
-    ):
-        lines.append(f"{key}: {result[key]}")
+    for key in DOCTOR_TEXT_KEYS:
+        if key in result:
+            lines.append(f"{key}: {result[key]}")
     return "\n".join(lines)
 
 
