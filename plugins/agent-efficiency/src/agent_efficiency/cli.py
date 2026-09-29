@@ -31,6 +31,10 @@ from agent_efficiency.host_data import settle_data_dir, unused_host_stores
 from agent_efficiency.models import VALID_MODES
 from agent_efficiency.paths import PLUGIN_ROOT, is_private
 from agent_efficiency.policy import PolicyPack
+from agent_efficiency.python_support import (
+    MINIMUM_PYTHON,
+    unsupported_python_message,
+)
 from agent_efficiency.report import (
     build_explanation,
     build_report,
@@ -1116,13 +1120,37 @@ def _doctor(store: Store) -> dict[str, Any]:
 
     hosts = _host_package_status()
     installed = _installed_host_status()
+    minimum_python = ".".join(str(part) for part in MINIMUM_PYTHON)
+    hook_path, hook_version = _hook_python()
+    hook_python_supported = hook_version is None or (
+        unsupported_python_message(
+            tuple(int(part) for part in hook_version.split(".")[:3])
+        )
+        is None
+    )
+    if hook_path is None:
+        hook_python = (
+            "python3 is not on PATH here; hooks run python3 from the host's PATH "
+            f"and need Python {minimum_python} or newer"
+        )
+    elif hook_version is None:
+        hook_python = f"{hook_path} did not report its version"
+    elif hook_python_supported:
+        hook_python = f"{hook_path} is Python {hook_version}, supported"
+    else:
+        hook_python = (
+            f"{hook_path} is Python {hook_version}; hooks need Python "
+            f"{minimum_python} or newer. Put a newer python3 on PATH."
+        )
     data_dir_private = is_private(store.paths.root) and is_private(
         store.paths.database
     )
     checks: dict[str, Any] = {
         "runtime_version": __version__,
         "python": platform.python_version(),
-        "python_supported": sys.version_info >= (3, 11),
+        "python_minimum": minimum_python,
+        "python_supported": unsupported_python_message(sys.version_info) is None,
+        "hook_python": hook_python,
         "data_dir": str(store.paths.root),
         "data_dir_writable": os.access(store.paths.root, os.W_OK),
         "data_dir_private": data_dir_private,
@@ -1161,8 +1189,10 @@ def _doctor(store: Store) -> dict[str, Any]:
         ),
         "privacy": "prompt bodies, raw commands, code, outputs, and transcripts are not stored",
     }
+    checks["hook_python_supported"] = hook_python_supported
     checks["ok"] = bool(
         checks["python_supported"]
+        and checks["hook_python_supported"]
         and checks["data_dir_writable"]
         and checks["database_ready"]
         and checks["active_policy_count"]
@@ -1171,6 +1201,35 @@ def _doctor(store: Store) -> dict[str, Any]:
         and checks["installed_hosts_ready"]
     )
     return checks
+
+
+def _hook_python() -> tuple[str | None, str | None]:
+    """Return the python3 that hooks would find on this PATH, and its version."""
+
+    executable = shutil.which("python3")
+    if not executable:
+        return None, None
+    try:
+        completed = subprocess.run(
+            [
+                executable,
+                "-S",
+                "-c",
+                "import sys; print('.'.join(map(str, sys.version_info[:3])))",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return executable, None
+    version = completed.stdout.strip()
+    if completed.returncode != 0 or not all(
+        part.isdigit() for part in version.split(".")
+    ):
+        return executable, None
+    return executable, version
 
 
 def _tool_version(command: str) -> str | None:
@@ -1196,6 +1255,8 @@ def _tool_version(command: str) -> str | None:
 DOCTOR_TEXT_KEYS = (
     "runtime_version",
     "python",
+    "python_minimum",
+    "hook_python",
     "data_dir",
     "data_dir_permissions",
     "unused_data_dirs",
