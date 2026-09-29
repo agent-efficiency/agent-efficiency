@@ -55,7 +55,7 @@ from agent_efficiency.statusline import process_statusline
 from agent_efficiency.store import Store, project_identity
 from agent_efficiency.vault import cli_commands as vault_commands
 from agent_efficiency.verification.config import load_project_config
-from agent_efficiency.verification.receipts import receipt_state
+from agent_efficiency.verification.receipts import reason_text, receipt_state
 from agent_efficiency.verification.runner import run_checks
 from agent_efficiency.verification.state import workspace_state
 
@@ -634,6 +634,9 @@ def _check_project(args: argparse.Namespace, store: Store) -> int:
             f"Agent Efficiency check {receipt['check_id']}: "
             f"{receipt['result']} (receipt {receipt['receipt_id']})"
         )
+        reason = reason_text(receipt)
+        if reason:
+            print(f"  reason: {receipt.get('reason_code') or 'unknown'}: {reason}")
     return 0 if all(item["result"] == "pass" for item in receipts) else 1
 
 
@@ -679,6 +682,8 @@ def _evidence(args: argparse.Namespace, store: Store) -> int:
             result = {"ok": False, "error": "verification receipt not found"}
             _emit(result if args.json else result["error"], args.json)
             return 1
+        receipt["reason_code"] = receipt.get("reason_code")
+        receipt["reason"] = reason_text(receipt)
         _emit(receipt if args.json else _format_key_values(receipt), args.json)
         return 0
     try:
@@ -711,7 +716,16 @@ def _evidence(args: argparse.Namespace, store: Store) -> int:
 def _format_evidence(values: list[dict[str, Any]]) -> str:
     if not values:
         return "No verification checks are configured."
-    return "\n".join(f"{value['check_id']}: {value['state']}" for value in values)
+    lines = []
+    for value in values:
+        line = f"{value['check_id']}: {value['state']}"
+        receipt = value["receipt"]
+        if receipt and value["state"] == receipt.get("result"):
+            reason = reason_text(receipt)
+            if reason:
+                line = f"{line}: {reason}"
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def _smoke_test(args: argparse.Namespace) -> int:

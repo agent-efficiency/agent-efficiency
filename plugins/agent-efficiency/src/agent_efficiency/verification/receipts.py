@@ -24,9 +24,49 @@ class VerificationReceipt:
     session_id: str | None = None
     turn_id: str | None = None
     schema_version: int = 1
+    reason_code: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+# Why a check result is not a pass. The code is stored with the receipt; the
+# sentence is written from it when the receipt is shown, so no command text or
+# output is ever stored.
+REASONS = {
+    "exit_nonzero": "The check command exited with status {exit_code}.",
+    "timeout": "The check command did not finish within its time limit.",
+    "not_started": (
+        "The check command could not be started. Check that the program "
+        "exists on PATH."
+    ),
+    "workspace_unknown": (
+        "The workspace state could not be read before the check, so the result "
+        "cannot be tied to it. Run checks at the root of a git repository with "
+        "at least one commit."
+    ),
+    "workspace_changed": (
+        "The check changed files in the workspace, so its result does not "
+        "describe the files as they were checked. Commit or ignore the files "
+        "the check writes, then run it again."
+    ),
+    "workspace_unreadable": (
+        "The workspace state could not be read after the check, so the result "
+        "cannot be tied to it."
+    ),
+}
+
+
+def reason_text(receipt: dict[str, Any]) -> str | None:
+    """Return one plain sentence for why a receipt is not a pass."""
+
+    if receipt.get("result") == "pass":
+        return None
+    code = receipt.get("reason_code")
+    template = REASONS.get(str(code)) if code else None
+    if template is None:
+        return "No reason was recorded; the receipt predates recorded reasons."
+    return template.format(exit_code=receipt.get("exit_code"))
 
 
 def receipt_state(

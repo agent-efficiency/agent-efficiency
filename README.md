@@ -185,7 +185,8 @@ receipt binds:
 
 - the full Git commit;
 - tracked changes;
-- untracked file content;
+- untracked file content, except inside the tool cache folders
+  `__pycache__`, `.pytest_cache`, `.mypy_cache`, and `.ruff_cache`;
 - the verification configuration;
 - the check result and time.
 
@@ -197,8 +198,10 @@ agent-efficiency evidence list --json
 agent-efficiency evidence show RECEIPT_ID
 ```
 
-Non-Git workspaces and unreadable workspace state are inconclusive. Activity
-counters never count as verification receipts.
+Non-Git workspaces and unreadable workspace state are inconclusive. A check
+that changes files outside those cache folders is also inconclusive. Every
+result that is not a pass records a reason, which `check` and `evidence show`
+print. Activity counters never count as verification receipts.
 
 ## Diagnose the installation
 

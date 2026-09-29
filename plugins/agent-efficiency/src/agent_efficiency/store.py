@@ -56,6 +56,16 @@ VAULT_EMITTED = ("delivered", "truncated", "deferred")
 # A compact receipt with one of these dispositions handled its compaction.
 VAULT_COMPACTION_HANDLED = (*VAULT_EMITTED, "degraded", "withheld")
 _VAULT_DIGEST = re.compile(r"^[0-9a-f]{16}$")
+# Why a verification result is not a pass. Fixed codes only; the plain sentence
+# for each lives in verification.receipts.REASONS.
+VERIFICATION_REASONS = (
+    "exit_nonzero",
+    "timeout",
+    "not_started",
+    "workspace_unknown",
+    "workspace_changed",
+    "workspace_unreadable",
+)
 
 
 def _sql_choices(values: tuple[str, ...]) -> str:
@@ -85,6 +95,29 @@ CREATE INDEX IF NOT EXISTS vault_receipts_session
 CREATE INDEX IF NOT EXISTS vault_receipts_recorded
     ON vault_receipts(recorded_at);
 """
+
+
+RECEIPT_REASON_COLUMN = (
+    "reason_code TEXT CHECK(reason_code IS NULL OR reason_code IN "
+    f"({_sql_choices(VERIFICATION_REASONS)}))"
+)
+
+
+def _add_receipt_reason_column(conn: sqlite3.Connection) -> None:
+    """Add the reason column to a receipt table made by an earlier release.
+
+    The column is added in place rather than through a schema version, so an
+    earlier release can still open the same database.
+    """
+
+    columns = {
+        str(column[1])
+        for column in conn.execute("PRAGMA table_info(verification_receipts)")
+    }
+    if columns and "reason_code" not in columns:
+        conn.execute(
+            f"ALTER TABLE verification_receipts ADD COLUMN {RECEIPT_REASON_COLUMN}"
+        )
 
 
 def utc_now() -> str:
@@ -497,6 +530,7 @@ class Store:
             conn.execute(
                 "INSERT OR IGNORE INTO settings(key, value) VALUES('default_mode', 'advise')"
             )
+            _add_receipt_reason_column(conn)
 
     def _migrate(self) -> None:
         with self.connect() as conn:
@@ -2834,6 +2868,7 @@ class Store:
         self.ensure_current_schema()
         now = utc_now()
         with self.connect() as conn:
+            _add_receipt_reason_column(conn)
             conn.execute(
                 """
                 INSERT INTO check_definitions(
@@ -2872,8 +2907,8 @@ class Store:
                     project_key, check_id, check_digest, workspace_digest,
                     git_commit, dirty, started_at, finished_at, duration_ms,
                     exit_code, result, runner_version, host, session_id,
-                    turn_id, schema_version
-                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    turn_id, schema_version, reason_code
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     project_key,
@@ -2892,6 +2927,7 @@ class Store:
                     receipt.get("session_id"),
                     receipt.get("turn_id"),
                     int(receipt["schema_version"]),
+                    receipt.get("reason_code"),
                 ),
             )
             return int(cursor.lastrowid)

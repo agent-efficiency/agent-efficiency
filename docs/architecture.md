@@ -195,7 +195,8 @@ A receipt binds the result to:
 
 - the full Git commit;
 - tracked changes;
-- untracked file content;
+- untracked file content, except inside the tool cache folders
+  `__pycache__`, `.pytest_cache`, `.mypy_cache`, and `.ruff_cache`;
 - the project verification configuration;
 - check identity;
 - exit status;
