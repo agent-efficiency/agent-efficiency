@@ -37,12 +37,14 @@ from pathlib import Path, PurePosixPath
 
 from agent_efficiency.vault.frontmatter import FrontmatterError
 from agent_efficiency.vault.index import (
+    INDEX_JSON,
     IndexError_,
     build_from_notes,
     cap_overflow,
     is_index_artifact,
     is_note_path,
     preflight,
+    render_payload,
 )
 from agent_efficiency.vault.root import (
     VaultRootError,
@@ -81,6 +83,11 @@ MARKDOWN_SUFFIX = ".md"
 
 class GuardError(ValueError):
     """Raised when the tree itself cannot be checked."""
+
+
+# Passed as ``index`` when the caller has no index to compare, so the check
+# that the index is current is skipped rather than failed.
+NOT_CHECKED = object()
 
 
 @dataclass(frozen=True)
@@ -151,7 +158,24 @@ def check_tree(root: Path, remote_url: str | None = None) -> list[Finding]:
         relative = path.relative_to(tree.root).as_posix()
         items.append((relative, _read(path)))
 
-    findings.extend(_check_items(tree, items, remote_url))
+    index_path = tree.root / INDEX_JSON
+    index: bytes | None | object
+    if index_path.is_symlink() or (index_path.exists() and not index_path.is_file()):
+        # The preflight above already reports an artifact that is not a file.
+        index = NOT_CHECKED
+    elif index_path.is_file():
+        index = _read(index_path)
+    else:
+        index = None
+    findings.extend(
+        _check_items(
+            tree,
+            items,
+            remote_url,
+            index=index,
+            index_remedy=f"run agent-efficiency vault index {tree.root}",
+        )
+    )
     return findings
 
 
@@ -159,6 +183,9 @@ def check_content(
     tree: VaultTree,
     items: Iterable[tuple[str, bytes]],
     remote_url: str | None = None,
+    *,
+    index: bytes | None | object = NOT_CHECKED,
+    index_remedy: str = "",
 ) -> list[Finding]:
     """Check content that is already in hand rather than content on disk.
 
@@ -169,10 +196,18 @@ def check_content(
 
     Every rule ``check_tree`` applies is applied here: classification, size
     cap, note schema, duplicate ids, index size, the secret scan, and the push
-    destination.
+    destination. ``index`` is the ``index.json`` content that goes with the
+    items, or None when there is none; it must match what ``vault index``
+    would write. Leave it out to skip that comparison.
     """
 
-    return _check_items(tree, [(path, data) for path, data in items], remote_url)
+    return _check_items(
+        tree,
+        [(path, data) for path, data in items],
+        remote_url,
+        index=index,
+        index_remedy=index_remedy,
+    )
 
 
 def check_history_classification(
@@ -224,6 +259,9 @@ def _check_items(
     tree: VaultTree,
     items: list[tuple[str, bytes | None]],
     remote_url: str | None,
+    *,
+    index: bytes | None | object = NOT_CHECKED,
+    index_remedy: str = "",
 ) -> list[Finding]:
     """The whole of the rule set. ``None`` bytes mean the file could not be read."""
 
@@ -232,6 +270,9 @@ def _check_items(
 
     notes: list[tuple[str, str]] = []
     seen: dict[str, str] = {}
+    # A note that cannot be read cannot be indexed either, so the index is only
+    # compared when every note was read.
+    all_notes_read = True
 
     for relative, data in sorted(items, key=lambda item: item[0]):
         _check_relative(relative)
@@ -241,6 +282,7 @@ def _check_items(
             findings.append(
                 _unreadable(relative, "file could not be read as UTF-8 text")
             )
+            all_notes_read = all_notes_read and not is_note_path(relative)
             continue
         try:
             text = data.decode("utf-8")
@@ -248,23 +290,38 @@ def _check_items(
             findings.append(
                 _unreadable(relative, "file is not UTF-8 text")
             )
+            all_notes_read = all_notes_read and not is_note_path(relative)
             continue
         if is_note_path(relative):
             findings.extend(_check_note(text, relative, tree.classification, seen))
             notes.append((relative, text))
         findings.extend(scan_secrets(text, relative))
 
-    findings.extend(_check_index(tree, notes, findings))
+    findings.extend(
+        _check_index(
+            tree,
+            notes,
+            findings,
+            index if all_notes_read else NOT_CHECKED,
+            index_remedy,
+        )
+    )
     return findings
 
 
 def _check_index(
-    tree: VaultTree, notes: list[tuple[str, str]], found: list[Finding]
+    tree: VaultTree,
+    notes: list[tuple[str, str]],
+    found: list[Finding],
+    current: bytes | None | object = NOT_CHECKED,
+    remedy: str = "",
 ) -> list[Finding]:
     """Report anything that would stop this note set from indexing.
 
     A tree that passes the guards has to be a tree that indexes, or a commit
-    passes and the next ``vault index`` fails.
+    passes and the next ``vault index`` fails. When ``current`` is given, it
+    also has to equal the index that ``vault index`` would write, because the
+    hooks read the index and never the notes.
     """
 
     try:
@@ -282,7 +339,23 @@ def _check_index(
                 remedy="correct the note this names, then check again",
             )
         ]
-    return [
+    stale: list[Finding] = []
+    if current is not NOT_CHECKED:
+        expected = render_payload(index).encode("utf-8")
+        if current != expected:
+            stale.append(
+                Finding(
+                    rule="index_stale",
+                    location=str(tree.root / INDEX_JSON),
+                    detail=(
+                        f"{INDEX_JSON} is missing"
+                        if current is None
+                        else f"{INDEX_JSON} does not match the notes in this tree"
+                    ),
+                    remedy=remedy or f"run agent-efficiency vault index {tree.root}",
+                )
+            )
+    return stale + [
         Finding(
             rule="index_cap",
             location=str(tree.root),

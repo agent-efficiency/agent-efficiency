@@ -43,7 +43,12 @@ from agent_efficiency.vault.guards import (
     is_scannable,
     scan_secrets,
 )
-from agent_efficiency.vault.index import IndexError_, cap_overflow, write_index
+from agent_efficiency.vault.index import (
+    INDEX_JSON,
+    IndexError_,
+    cap_overflow,
+    write_index,
+)
 from agent_efficiency.vault.migrate import MigrationError, apply_proposal, propose
 from agent_efficiency.vault.prepare import prepare
 from agent_efficiency.vault.render import ALLOWANCE
@@ -330,8 +335,30 @@ def _check_staged(root: Path) -> list[Finding]:
     """Check the content of the git index, which is what a commit will hold."""
 
     tree, repository, prefix = _repository(root)
-    items = gitcontent.staged_items(repository, prefix, keep=is_scannable)
-    return check_content(tree, items)
+    items = gitcontent.staged_items(repository, prefix, keep=_with_index)
+    notes, index = _split_index(items)
+    return check_content(
+        tree,
+        notes,
+        index=index,
+        index_remedy=(
+            f"run agent-efficiency vault index {tree.root}, then stage "
+            f"{INDEX_JSON} and INDEX.md"
+        ),
+    )
+
+
+def _with_index(relative: str) -> bool:
+    """Read what the guards check, plus the generated index they compare."""
+
+    return relative == INDEX_JSON or is_scannable(relative)
+
+
+def _split_index(
+    items: list[tuple[str, bytes]],
+) -> tuple[list[tuple[str, bytes]], bytes | None]:
+    index = next((data for path, data in items if path == INDEX_JSON), None)
+    return [item for item in items if item[0] != INDEX_JSON], index
 
 
 def _check_push(root: Path, remote_url: str | None) -> list[Finding]:
@@ -349,26 +376,44 @@ def _check_push(root: Path, remote_url: str | None) -> list[Finding]:
     refs = gitcontent.parse_refs(sys.stdin.read())
 
     findings = check_content(tree, [], remote_url=remote_url)
-    plan = gitcontent.push_plan(repository, refs, prefix, keep=is_scannable)
+    plan = gitcontent.push_plan(repository, refs, prefix, keep=_with_index)
+    # The index is read only to compare it with each tip. Its blobs are
+    # generated from notes that are checked in their own right.
+    objects = [
+        (location, data)
+        for location, data in plan.objects
+        if location.split(" (object ", 1)[0] != INDEX_JSON
+    ]
 
     carried: set[bytes] = set()
-    for _ref, items in plan.tips:
-        for _path, data in items:
+    for ref, items in plan.tips:
+        notes, index = _split_index(items)
+        for _path, data in notes:
             carried.add(hashlib.sha256(data).digest())
-        findings.extend(check_content(tree, items))
+        findings.extend(
+            check_content(
+                tree,
+                notes,
+                index=index,
+                index_remedy=(
+                    f"run agent-efficiency vault index {tree.root}, commit "
+                    f"{INDEX_JSON} and INDEX.md to {ref}, then push again"
+                ),
+            )
+        )
 
     findings.extend(
         check_history_classification(
             tree,
             [
                 (location, data)
-                for location, data in plan.objects
+                for location, data in objects
                 if hashlib.sha256(data).digest() not in carried
             ],
         )
     )
 
-    for location, data in plan.objects:
+    for location, data in objects:
         if hashlib.sha256(data).digest() in carried:
             continue
         try:

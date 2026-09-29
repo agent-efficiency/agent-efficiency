@@ -31,6 +31,8 @@ def make_tree(
     root: Path,
     classification: str = "work",
     remote_url: str = "git@git.example.com:example/vault-work.git",
+    *,
+    index: bool = True,
 ) -> None:
     root.mkdir(parents=True, exist_ok=True)
     (root / ".vault.json").write_text(
@@ -45,6 +47,8 @@ def make_tree(
         encoding="utf-8",
     )
     (root / "projects").mkdir(exist_ok=True)
+    if index:
+        index_module.write_index(root)
 
 
 def note(id_: str, classification: str = "work", body: str = "Body.") -> str:
@@ -151,6 +155,7 @@ class TreeCheckTests(unittest.TestCase):
             (root / "projects" / "alpha.md").write_text(
                 note("alpha"), encoding="utf-8"
             )
+            index_module.write_index(root)
             self.assertEqual(check_tree(root), [])
 
     def test_flags_a_misclassified_note(self) -> None:
@@ -173,6 +178,7 @@ class TreeCheckTests(unittest.TestCase):
             (root / "projects" / "alpha.md").write_text(
                 note("alpha", body="x" * 4000), encoding="utf-8"
             )
+            index_module.write_index(root)
             self.assertEqual([item.rule for item in check_tree(root)], ["cap"])
 
     def test_flags_a_wrong_push_destination(self) -> None:
@@ -182,6 +188,7 @@ class TreeCheckTests(unittest.TestCase):
             (root / "projects" / "alpha.md").write_text(
                 note("alpha"), encoding="utf-8"
             )
+            index_module.write_index(root)
             findings = check_tree(
                 root, remote_url="git@git.example.com:example/vault-core.git"
             )
@@ -379,7 +386,7 @@ class ContentCheckTests(unittest.TestCase):
     def test_flags_a_misclassified_note_that_is_not_on_disk(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
-            make_tree(root)
+            make_tree(root, index=False)
             findings = self.check(root, [("projects/a.md", note("a", "private"))])
             self.assertEqual([item.rule for item in findings], ["classification"])
             self.assertEqual(list(root.rglob("*.md")), [])
@@ -387,7 +394,7 @@ class ContentCheckTests(unittest.TestCase):
     def test_a_clean_set_produces_no_findings(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
-            make_tree(root)
+            make_tree(root, index=False)
             self.assertEqual(
                 self.check(
                     root,
@@ -399,7 +406,7 @@ class ContentCheckTests(unittest.TestCase):
     def test_flags_two_handed_over_notes_that_share_an_id(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
-            make_tree(root)
+            make_tree(root, index=False)
             findings = self.check(
                 root, [("projects/a.md", note("a")), ("feedback/copy.md", note("a"))]
             )
@@ -408,7 +415,7 @@ class ContentCheckTests(unittest.TestCase):
     def test_scans_an_archive_named_index_md(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
-            make_tree(root)
+            make_tree(root, index=False)
             findings = self.check(
                 root, [("projects/a/archive/INDEX.md", f"text\n{TOKEN}\n")]
             )
@@ -417,7 +424,7 @@ class ContentCheckTests(unittest.TestCase):
     def test_skips_the_generated_index_artifacts_at_the_root(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
-            make_tree(root)
+            make_tree(root, index=False)
             self.assertEqual(
                 self.check(root, [("INDEX.md", f"text\n{TOKEN}\n")]), []
             )
@@ -428,21 +435,21 @@ class ContentCheckTests(unittest.TestCase):
     def test_flags_a_push_destination_with_no_content_at_all(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
-            make_tree(root)
+            make_tree(root, index=False)
             findings = self.check(root, [], remote="git@git.example.com:someone/other.git")
             self.assertEqual([item.rule for item in findings], ["destination"])
 
     def test_refuses_a_path_that_leaves_the_tree(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
-            make_tree(root)
+            make_tree(root, index=False)
             with self.assertRaises(GuardError):
                 self.check(root, [("../outside.md", "text\n")])
 
     def test_flags_bytes_that_are_not_utf8(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
-            make_tree(root)
+            make_tree(root, index=False)
             findings = check_content(
                 find_tree(root), [("projects/a.md", b"---\nid: \xff\n---\n")]
             )
@@ -488,6 +495,7 @@ class IndexAgreementTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             make_tree(root)
+            (root / "index.json").unlink()
             (root / "index.json").mkdir()
             findings = check_tree(root)
             self.assertEqual([item.rule for item in findings], ["index"])
@@ -514,6 +522,7 @@ class IndexAgreementTests(unittest.TestCase):
                 (root / "projects" / f"note-{number:03d}.md").write_text(
                     note(f"note-{number:03d}"), encoding="utf-8"
                 )
+            index_module.write_index(root)
             with mock.patch.object(index_module, "INDEX_CAP", 800):
                 findings = check_tree(root)
             self.assertTrue(findings)
@@ -527,6 +536,7 @@ class IndexAgreementTests(unittest.TestCase):
             root = Path(raw)
             make_tree(root)
             (root / "projects" / "alpha.md").write_text(note("alpha"), "utf-8")
+            index_module.write_index(root)
             self.assertEqual(check_tree(root), [])
 
 

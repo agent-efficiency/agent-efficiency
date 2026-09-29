@@ -130,6 +130,11 @@ class HookHarness(unittest.TestCase):
         target.write_text(text, encoding="utf-8")
         return target
 
+    def reindex(self) -> None:
+        """Regenerate the index, as a person does after editing notes."""
+
+        self.vault("vault", "index", str(self.root))
+
     def stage_then_restore(self, relative: str, staged: str, restored: str) -> None:
         """Stage one content and leave a different, clean content on disk.
 
@@ -149,6 +154,7 @@ class PreCommitTests(HookHarness):
 
     def test_a_clean_staged_note_commits(self) -> None:
         self.write("projects/alpha.md", note("alpha"))
+        self.reindex()
         self.run_git("add", "-A")
         result = self.git("commit", "-m", "alpha")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -184,6 +190,7 @@ class PreCommitTests(HookHarness):
 
     def test_a_staged_note_that_collides_with_a_committed_one_is_refused(self) -> None:
         self.write("projects/alpha.md", note("alpha"))
+        self.reindex()
         self.run_git("add", "-A")
         self.run_git("commit", "-m", "alpha")
 
@@ -215,7 +222,8 @@ class PreCommitTests(HookHarness):
         """The working copy is not what is being committed, in either direction."""
 
         self.write("projects/alpha.md", note("alpha"))
-        self.run_git("add", "projects/alpha.md")
+        self.reindex()
+        self.run_git("add", "projects/alpha.md", "index.json", "INDEX.md")
         self.write("projects/alpha.md", note("alpha", "private"))
         result = self.git("commit", "-m", "alpha")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -233,11 +241,15 @@ class PrePushTests(HookHarness):
 
     def commit_without_checking(self, relative: str, text: str, message: str) -> None:
         self.write(relative, text)
+        # Indexing fails for a misfiled note, which leaves the old index. The
+        # push must still be refused for the note itself.
+        self.reindex()
         self.run_git("add", "-A")
         self.run_git("commit", "--no-verify", "-m", message)
 
     def test_a_clean_push_to_the_registered_remote_is_allowed(self) -> None:
         self.write("projects/alpha.md", note("alpha"))
+        self.reindex()
         self.run_git("add", "-A")
         self.run_git("commit", "-m", "alpha")
         result = self.push()
@@ -285,6 +297,14 @@ class PrePushTests(HookHarness):
         result = self.push()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_a_tip_with_a_stale_index_is_refused(self) -> None:
+        self.write("projects/alpha.md", note("alpha"))
+        self.run_git("add", "-A")
+        self.run_git("commit", "--no-verify", "-m", "alpha without the index")
+        result = self.push()
+        self.assertNotEqual(result.returncode, 0, "a stale index pushed")
+        self.assertIn("index_stale", result.stdout + result.stderr)
+
     def test_a_secret_in_an_outgoing_archive_is_refused(self) -> None:
         self.commit_without_checking(
             "projects/alpha/archive/0001-imported.md",
@@ -320,6 +340,7 @@ class PrePushTests(HookHarness):
         twin = self.base / "origin"
         self.run_git("init", "--bare", str(twin), cwd=self.base)
         self.write("projects/alpha.md", note("alpha"))
+        self.reindex()
         self.run_git("add", "-A")
         self.run_git("commit", "-m", "alpha")
         result = self.push(str(twin))

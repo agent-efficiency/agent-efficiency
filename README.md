@@ -262,8 +262,8 @@ cd ~/notes/vault-core && git init && git config --local core.hooksPath .githooks
 `feedback`, `reference`, `doctrine`, `sessions`), an empty index, and
 pre-commit and pre-push hooks in `.githooks`. Run the same `git` commands in
 each tree. The hooks check what git is about to commit or push: note
-classification, size caps, note schema, duplicate ids, the index, and known
-credential shapes. The pre-push hook also refuses a remote other than the one
+classification, size caps, note schema, duplicate ids, whether `index.json`
+matches the notes, and known credential shapes. The pre-push hook also refuses a remote other than the one
 the marker names.
 
 A note is markdown with a small frontmatter block:
