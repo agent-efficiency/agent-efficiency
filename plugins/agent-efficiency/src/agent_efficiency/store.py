@@ -53,6 +53,8 @@ VAULT_REASONS = (
     "cap_allowed_indeterminate",
 )
 VAULT_EMITTED = ("delivered", "truncated", "deferred")
+# A compact receipt with one of these dispositions handled its compaction.
+VAULT_COMPACTION_HANDLED = (*VAULT_EMITTED, "degraded", "withheld")
 _VAULT_DIGEST = re.compile(r"^[0-9a-f]{16}$")
 
 
@@ -1682,21 +1684,47 @@ class Store:
         """
 
         self.ensure_current_schema()
-        handled = (*VAULT_EMITTED, "degraded", "withheld")
         with self.connect() as conn:
-            row = conn.execute(
-                f"""
-                SELECT
-                    (SELECT COUNT(*) FROM events
-                      WHERE session_id = ? AND event_name = 'PreCompact'),
-                    (SELECT COUNT(*) FROM vault_receipts
-                      WHERE session_id = ? AND cause = 'compact'
-                        AND disposition IN ({_sql_choices(handled)}))
-                """,
-                (session_id, session_id),
-            ).fetchone()
-        compactions, delivered = int(row[0]), int(row[1])
-        return compactions == 0 or compactions > delivered
+            compactions, handled = self._vault_compaction_counts(conn, session_id)
+        return compactions == 0 or compactions > handled
+
+    def record_vault_compaction_receipt(
+        self, session_id: str, **fields: Any
+    ) -> int | None:
+        """Record a compact receipt only while a compaction is still due.
+
+        The due check and the insert share one immediate transaction, so when
+        several events race to handle one compaction, exactly one records it.
+        Return the new row id, or ``None`` when the compaction was already
+        handled.
+        """
+
+        row = self._vault_receipt_row(session_id, **fields)
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            compactions, handled = self._vault_compaction_counts(conn, session_id)
+            if compactions and compactions <= handled:
+                return None
+            return self._insert_vault_receipt(conn, row)
+
+    @staticmethod
+    def _vault_compaction_counts(
+        conn: sqlite3.Connection, session_id: str
+    ) -> tuple[int, int]:
+        """Return the compactions seen and the compact receipts that handled one."""
+
+        row = conn.execute(
+            f"""
+            SELECT
+                (SELECT COUNT(*) FROM events
+                  WHERE session_id = ? AND event_name = 'PreCompact'),
+                (SELECT COUNT(*) FROM vault_receipts
+                  WHERE session_id = ? AND cause = 'compact'
+                    AND disposition IN ({_sql_choices(VAULT_COMPACTION_HANDLED)}))
+            """,
+            (session_id, session_id),
+        ).fetchone()
+        return int(row[0]), int(row[1])
 
     def vault_summary(
         self, days: int = 30, *, session_id: str | None = None

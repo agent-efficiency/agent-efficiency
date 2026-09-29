@@ -32,7 +32,7 @@ from typing import Any
 from agent_efficiency.adapters import adapter_for
 from agent_efficiency.adapters.base import BaseAdapter
 from agent_efficiency.contracts.effects import CanonicalEffect
-from agent_efficiency.store import Store
+from agent_efficiency.store import VAULT_COMPACTION_HANDLED, Store
 from agent_efficiency.vault.prepare import Prepared, prepare, stopped
 from agent_efficiency.vault.render import HEADER
 
@@ -219,6 +219,19 @@ def _finish(
         "disposition": disposition,
         "reason_code": code,
     }
+    if cause == "compact" and disposition in VAULT_COMPACTION_HANDLED:
+        # A session start after a compaction and a PostCompact event can race to
+        # handle one compaction. Only the one that records the receipt sends its
+        # output, so the receipt count never overtakes the compaction count.
+        # A claim that cannot be recorded still sends, because a second copy
+        # is better than no context after a compaction.
+        try:
+            claimed = store.record_vault_compaction_receipt(session_id, **fields)
+        except (OSError, ValueError, sqlite3.Error):
+            return Delivery(output, disposition, code)
+        if claimed is None:
+            return Delivery(None, "skipped", "unchanged")
+        return Delivery(output, disposition, code)
     if cause == "deferred":
         # Several tool results can race to make the deferred delivery. Only
         # the one that records the receipt sends its output. A claim that

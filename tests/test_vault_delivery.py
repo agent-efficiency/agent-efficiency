@@ -636,6 +636,34 @@ class SessionStartDeliveryTests(VaultDeliveryBase):
             [("new", "delivered"), ("compact", "delivered"), ("compact", "delivered")],
         )
 
+    def test_racing_compaction_deliveries_emit_once(self) -> None:
+        """Two deliveries that both passed the early check still emit once.
+
+        The session start and the PostCompact event of one compaction can run
+        at the same time. Only one of them may record the compact receipt, or
+        the receipt count overtakes the compaction count and the next
+        compaction is treated as already handled.
+        """
+
+        self.claude("SessionStart", source="startup")
+        self.claude("PreCompact")
+        with mock.patch.object(Store, "vault_compaction_due", return_value=True):
+            first = self.claude("SessionStart", source="compact")
+            second = self.claude("PostCompact")
+        emitted = [
+            output
+            for output in (first, second)
+            if output and HEAD in output["hookSpecificOutput"]["additionalContext"]
+        ]
+        self.assertEqual(len(emitted), 1)
+        self.assertEqual(
+            [row[:2] for row in self.receipts("s-claude")],
+            [("new", "delivered"), ("compact", "delivered")],
+        )
+        self.claude("PreCompact")
+        output = self.claude("SessionStart", source="compact")
+        self.assertIn(HEAD, output["hookSpecificOutput"]["additionalContext"])
+
     def test_codex_compaction_delivers_at_post_compact(self) -> None:
         for session, pre_compact in (("s-codex", False), ("s-codex-pre", True)):
             with self.subTest(pre_compact=pre_compact):
