@@ -207,6 +207,17 @@ class DistributionValidationTests(unittest.TestCase):
             self.assertTrue(result["ok"])
             self.assertTrue(result["native_response_shape_valid"])
 
+    def test_smoke_test_names_the_command_it_ran(self) -> None:
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(main(["smoke-test", "claude", "--json"]), 0)
+        result = json.loads(output.getvalue())
+        self.assertNotIn("installed_command", result)
+        self.assertEqual(
+            result["command_under_test"],
+            str(PLUGIN_ROOT / "scripts" / "agent_efficiency_hook.py"),
+        )
+        self.assertIn("doctor", result["installed_copy"])
+
     def test_doctor_reports_verified_first_party_pack(self) -> None:
         with (
             tempfile.TemporaryDirectory() as temp,

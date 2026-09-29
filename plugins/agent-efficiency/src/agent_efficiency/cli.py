@@ -148,7 +148,8 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--json", action="store_true")
 
     smoke = subparsers.add_parser(
-        "smoke-test", help="Run fixture events through the installed hook command."
+        "smoke-test",
+        help="Run fixture events through this package's hook command.",
     )
     smoke.add_argument("host", choices=("claude", "cursor", "codex"))
     smoke.add_argument("--json", action="store_true")
@@ -762,7 +763,13 @@ def _smoke_test(args: argparse.Namespace) -> int:
     result = {
         "ok": started[0] == 0 and status.get("returncode") == 0 and shape_valid,
         "host": args.host,
-        "installed_command": str(script),
+        # The hook script in the package this command runs from. It is not
+        # necessarily the copy a host installed; doctor checks that copy.
+        "command_under_test": str(script),
+        "installed_copy": (
+            "not tested here; run agent-efficiency doctor to check the copy "
+            "each host installed"
+        ),
         "session_event_exit": started[0],
         "native_response_shape_valid": shape_valid,
     }
