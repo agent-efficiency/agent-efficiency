@@ -834,17 +834,25 @@ def _deliver_pending_cursor_guidance(
 def _deferred_vault(
     store: Store, session_id: str, cwd: str, mode: str
 ) -> dict[str, Any] | None:
-    """Deliver vault context once when a Cursor session had no session start.
+    """Deliver vault context that Cursor could not receive at an earlier event.
 
     Cursor cloud agents fire no session start. The first tool result is the
     first event that can carry context, so delivery happens there and the
     receipt records it as deferred.
+
+    Cursor also sends no event after a compaction that can carry context. A
+    compaction is recorded at ``preCompact``, and the next tool result delivers
+    for it, once, as a compact delivery.
     """
 
     if not _vault_registered(store):
         return None
     try:
-        if store.has_vault_receipt(session_id, exclude_cause="request"):
+        if not store.has_vault_receipt(session_id, exclude_cause="request"):
+            cause = "deferred"
+        elif store.vault_compaction_pending(session_id):
+            cause = "compact"
+        else:
             return None
     except (OSError, ValueError, sqlite3.Error):
         return None
@@ -856,7 +864,7 @@ def _deferred_vault(
         "cursor",
         "PostToolUse",
         Path(cwd),
-        cause="deferred",
+        cause=cause,
         mode=mode,
     ).output
 

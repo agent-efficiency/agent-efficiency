@@ -590,6 +590,41 @@ class SessionStartDeliveryTests(VaultDeliveryBase):
         output = self.tool_result("s-local") or {}
         self.assertNotIn(HEAD, output.get("additional_context", ""))
 
+    def test_cursor_restores_the_vault_at_the_tool_result_after_compaction(
+        self,
+    ) -> None:
+        self.cursor("sessionStart", session="s-local")
+        self.cursor("preCompact", session="s-local")
+        output = self.tool_result("s-local") or {}
+        text = output.get("additional_context", "")
+        self.assertIn(HEAD, text)
+        self.assertIn(REPLACES, text)
+        again = self.tool_result("s-local") or {}
+        self.assertNotIn(HEAD, again.get("additional_context", ""))
+        self.assertEqual(
+            [row[:2] for row in self.receipts("s-local")],
+            [("new", "delivered"), ("compact", "delivered")],
+        )
+        self.assertFalse(self.store.vault_compaction_due("s-local"))
+
+    def test_cursor_restores_once_per_compaction_without_session_start(
+        self,
+    ) -> None:
+        self.assertIn(HEAD, self.tool_result("s-cloud")["additional_context"])
+        for _ in range(2):
+            self.cursor("preCompact", session="s-cloud")
+            self.assertIn(HEAD, self.tool_result("s-cloud")["additional_context"])
+            again = self.tool_result("s-cloud") or {}
+            self.assertNotIn(HEAD, again.get("additional_context", ""))
+        self.assertEqual(
+            [row[:2] for row in self.receipts("s-cloud")],
+            [
+                ("deferred", "deferred"),
+                ("compact", "delivered"),
+                ("compact", "delivered"),
+            ],
+        )
+
     def test_compaction_always_redelivers(self) -> None:
         self.claude("SessionStart", source="startup")
         output = self.claude("SessionStart", source="compact")

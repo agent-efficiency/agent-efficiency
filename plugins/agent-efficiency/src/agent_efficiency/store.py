@@ -1688,6 +1688,18 @@ class Store:
             compactions, handled = self._vault_compaction_counts(conn, session_id)
         return compactions == 0 or compactions > handled
 
+    def vault_compaction_pending(self, session_id: str) -> bool:
+        """Return whether a recorded compaction has not had its vault delivery.
+
+        Unlike ``vault_compaction_due``, a session with no ``PreCompact`` event
+        has nothing pending.
+        """
+
+        self.ensure_current_schema()
+        with self.connect() as conn:
+            compactions, handled = self._vault_compaction_counts(conn, session_id)
+        return compactions > handled
+
     def record_vault_compaction_receipt(
         self, session_id: str, **fields: Any
     ) -> int | None:
