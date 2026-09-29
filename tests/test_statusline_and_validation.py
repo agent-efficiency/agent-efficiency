@@ -229,7 +229,7 @@ class DistributionValidationTests(unittest.TestCase):
                 0,
             )
         doctor = json.loads(output.getvalue())
-        self.assertEqual(doctor["runtime_version"], "0.2.0")
+        self.assertEqual(doctor["runtime_version"], "0.2.1")
         self.assertIn("does not prove", doctor["fetch_observation_limit"])
         self.assertTrue(doctor["embedded_capability_pack_ready"])
         self.assertEqual(
