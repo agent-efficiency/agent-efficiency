@@ -739,6 +739,58 @@ class WriteAtomicityTests(unittest.TestCase):
             self.assertEqual(snapshot(work), before)
             self.assertEqual(sorted(work.rglob("*.tmp")), [])
 
+    def test_an_index_write_failure_leaves_the_tree_as_it_was(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            work = self.tree(raw)
+            (work / "projects").mkdir()
+            (work / "projects" / "kept.md").write_text(
+                "---\nschema: 1\nid: kept\ntitle: kept\ntype: project\n"
+                "classification: work\nstatus: active\nhook: kept hook\n---\n"
+                "Kept.\n",
+                encoding="utf-8",
+            )
+            migrate.write_index(work)
+            before = snapshot(work)
+            failure = migrate.IndexError_("index.json could not be written")
+            with (
+                mock.patch.object(migrate, "write_index", side_effect=failure),
+                self.assertRaises(MigrationError) as caught,
+            ):
+                apply_proposal(proposal(entry()), {"work": work})
+
+            self.assertIn("nothing was written", str(caught.exception))
+            self.assertEqual(snapshot(work), before)
+            self.assertFalse((work / "projects" / "umbra.md").exists())
+
+    def test_a_second_tree_index_failure_restores_both_trees(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            private = make_tree(Path(raw) / "vault-private", "private")
+            work = self.tree(raw)
+            for root in (private, work):
+                migrate.write_index(root)
+            before = {root: snapshot(root) for root in (private, work)}
+            real = migrate.write_index
+
+            def second_fails(root: Path) -> dict:
+                if root == work.resolve():
+                    raise OSError(28, "no space left on device")
+                return real(root)
+
+            with (
+                mock.patch.object(migrate, "write_index", second_fails),
+                self.assertRaises(MigrationError),
+            ):
+                apply_proposal(
+                    proposal(
+                        entry(id="mine", title="mine", classification="private"),
+                        entry(),
+                    ),
+                    {"private": private, "work": work},
+                )
+
+            for root in (private, work):
+                self.assertEqual(snapshot(root), before[root], root.name)
+
     def test_a_failure_after_a_file_is_in_place_still_removes_it(self) -> None:
         """The path is recorded before the write starts, not after it succeeds."""
 

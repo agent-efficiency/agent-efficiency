@@ -63,6 +63,8 @@ from pathlib import Path
 
 from agent_efficiency.vault.frontmatter import FrontmatterError
 from agent_efficiency.vault.index import (
+    INDEX_JSON,
+    INDEX_MARKDOWN,
     IndexError_,
     build_from_notes,
     is_note_path,
@@ -282,15 +284,25 @@ def apply_proposal(
             planned.append(write)
 
     _check_prospective_trees(roots, planned)
-    _install(planned, overwrite)
-
-    for root in sorted(touched):
-        try:
-            write_index(root)
-        except IndexError_ as exc:
-            raise MigrationError(
-                f"notes written, but {root} will not index: {exc}"
-            ) from None
+    # The index artifacts are recorded before any note is placed, so a failure
+    # while indexing puts them back along with the notes.
+    indexes = [
+        _Placed(path=root / name, previous=_previous(root / name))
+        for root in sorted(touched)
+        for name in (INDEX_JSON, INDEX_MARKDOWN)
+    ]
+    placed, made = _install(planned, overwrite)
+    try:
+        for root in sorted(touched):
+            try:
+                write_index(root)
+            except (IndexError_, OSError) as exc:
+                raise MigrationError(
+                    f"{root} will not index, so nothing was written: {exc}"
+                ) from None
+    except BaseException:
+        _undo(indexes + placed, made)
+        raise
 
     return [write.path for write in planned]
 
@@ -757,12 +769,15 @@ def _read_note(path: Path) -> str:
         raise IndexError_(f"{path}: could not be read: {exc}") from None
 
 
-def _install(planned: list[_Write], overwrite: bool) -> None:
+def _install(
+    planned: list[_Write], overwrite: bool
+) -> tuple[list[_Placed], list[Path]]:
     """Create every planned file, or leave the tree exactly as it was.
 
     Each destination is recorded before its write starts, not after it
     succeeds, so the file a failure interrupts is cleaned up along with the
-    files that came before it.
+    files that came before it. Return what was placed and the directories that
+    were made, so a later step that fails can undo them too.
     """
 
     placed: list[_Placed] = []
@@ -782,6 +797,7 @@ def _install(planned: list[_Write], overwrite: bool) -> None:
     except BaseException:
         _undo(placed, made)
         raise
+    return placed, made
 
 
 def _make_directories(directory: Path, source: str) -> list[Path]:
