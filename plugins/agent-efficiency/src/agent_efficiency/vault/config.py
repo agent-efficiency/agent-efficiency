@@ -13,6 +13,7 @@ import os
 import tempfile
 from pathlib import Path
 
+from agent_efficiency.paths import make_private_dir
 from agent_efficiency.vault.root import VaultTree, find_tree
 from agent_efficiency.vault.schema import CLASSIFICATIONS
 
@@ -156,7 +157,7 @@ def _paths(config: Path) -> list[str]:
 
 
 def _write(config: Path, trees: list[str]) -> None:
-    config.parent.mkdir(parents=True, exist_ok=True)
+    make_private_dir(config.parent)
     payload = json.dumps({"schema": CONFIG_SCHEMA, "trees": trees}, indent=2) + "\n"
     handle, staged = tempfile.mkstemp(
         dir=config.parent, prefix=".vault-", suffix=".tmp"

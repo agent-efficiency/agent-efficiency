@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from agent_efficiency.models import VALID_MODES
-from agent_efficiency.paths import RuntimePaths
+from agent_efficiency.paths import RuntimePaths, create_private_file
 
 
 SCHEMA_VERSION = "7"
@@ -101,8 +101,19 @@ class Store:
     def __init__(self, root: str | Path | None = None) -> None:
         self.paths = RuntimePaths.from_root(root)
         self.paths.ensure()
-        if not self.paths.database.is_file():
+        if not self.paths.database.is_file() or self._database_is_empty():
+            # SQLite gives its journal files the database's mode, so creating
+            # the file 0600 first keeps all three private.
+            create_private_file(self.paths.database)
             self._initialize()
+
+    def _database_is_empty(self) -> bool:
+        """An empty file is a store another process has only just created."""
+
+        try:
+            return self.paths.database.stat().st_size == 0
+        except OSError:
+            return False
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -500,6 +511,7 @@ class Store:
                     f"{self.paths.database.name}.schema-{version}.bak"
                 )
                 if not backup_path.exists():
+                    create_private_file(backup_path)
                     with closing(sqlite3.connect(backup_path)) as backup:
                         conn.backup(backup)
             if version == "1":

@@ -27,7 +27,7 @@ from agent_efficiency.capability_retrieval import (
 )
 from agent_efficiency.hook import format_session_status
 from agent_efficiency.models import VALID_MODES
-from agent_efficiency.paths import PLUGIN_ROOT
+from agent_efficiency.paths import PLUGIN_ROOT, is_private
 from agent_efficiency.policy import PolicyPack
 from agent_efficiency.report import (
     build_explanation,
@@ -928,12 +928,25 @@ def _doctor(store: Store) -> dict[str, Any]:
         embedded_capability_pack_digest = None
 
     hosts = _host_package_status()
+    data_dir_private = is_private(store.paths.root) and is_private(
+        store.paths.database
+    )
     checks: dict[str, Any] = {
         "runtime_version": __version__,
         "python": platform.python_version(),
         "python_supported": sys.version_info >= (3, 11),
         "data_dir": str(store.paths.root),
         "data_dir_writable": os.access(store.paths.root, os.W_OK),
+        "data_dir_private": data_dir_private,
+        "data_dir_permissions": (
+            "only you can read the data folder"
+            if data_dir_private
+            else (
+                "other users can read the data folder. Agent Efficiency does "
+                "not change the mode of a folder it did not create. To make it "
+                f"private, run: chmod -R go-rwx {store.paths.root}"
+            )
+        ),
         "database": str(store.paths.database),
         "database_ready": store.paths.database.is_file(),
         "default_mode": store.default_mode(),
@@ -989,6 +1002,7 @@ DOCTOR_TEXT_KEYS = (
     "runtime_version",
     "python",
     "data_dir",
+    "data_dir_permissions",
     "database",
     "default_mode",
     "active_policy_count",

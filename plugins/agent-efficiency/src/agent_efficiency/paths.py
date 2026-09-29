@@ -9,6 +9,60 @@ from pathlib import Path
 PACKAGE_DIR = Path(__file__).resolve().parent
 PLUGIN_ROOT = PACKAGE_DIR.parents[1]
 
+# The data folder holds session history and the list of vault trees, so only
+# its owner may read it. These modes are set on what this package creates,
+# whatever the umask. Existing folders and files keep their modes; doctor
+# reports a data folder that others can read.
+PRIVATE_DIR_MODE = 0o700
+PRIVATE_FILE_MODE = 0o600
+
+
+def make_private_dir(path: Path) -> None:
+    """Create ``path`` and any missing parents with mode 0700.
+
+    Only folders this call creates are given the private mode. A folder that
+    already exists is left as it is.
+    """
+
+    missing: list[Path] = []
+    current = path
+    while not current.exists():
+        missing.append(current)
+        if current.parent == current:
+            break
+        current = current.parent
+    for folder in reversed(missing):
+        try:
+            folder.mkdir(mode=PRIVATE_DIR_MODE)
+        except FileExistsError:
+            continue
+        os.chmod(folder, PRIVATE_DIR_MODE)
+
+
+def create_private_file(path: Path) -> bool:
+    """Create an empty file with mode 0600 unless it exists. Return True if new."""
+
+    try:
+        descriptor = os.open(
+            path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, PRIVATE_FILE_MODE
+        )
+    except FileExistsError:
+        return False
+    try:
+        os.fchmod(descriptor, PRIVATE_FILE_MODE)
+    finally:
+        os.close(descriptor)
+    return True
+
+
+def is_private(path: Path) -> bool:
+    """Whether no one but the owner can read or enter ``path``."""
+
+    try:
+        return path.stat().st_mode & 0o077 == 0
+    except OSError:
+        return True
+
 
 def data_dir(explicit: str | Path | None = None) -> Path:
     """Return the writable persistent data directory.
@@ -70,6 +124,6 @@ class RuntimePaths:
         )
 
     def ensure(self) -> None:
-        self.root.mkdir(parents=True, exist_ok=True)
-        self.knowledge_cards.mkdir(parents=True, exist_ok=True)
-        self.capability_packs.mkdir(parents=True, exist_ok=True)
+        make_private_dir(self.root)
+        make_private_dir(self.knowledge_cards)
+        make_private_dir(self.capability_packs)
