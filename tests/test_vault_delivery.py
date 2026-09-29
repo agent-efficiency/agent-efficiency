@@ -453,15 +453,47 @@ class SessionStartDeliveryTests(VaultDeliveryBase):
         self.assertEqual(rows[-1][:2], ("request", "truncated"))
         self.assertEqual(rows[-1][5], len(text))
 
-    def test_explicit_request_on_cursor_explains_the_limit(self) -> None:
+    def test_explicit_request_on_cursor_reloads_at_the_next_tool_result(
+        self,
+    ) -> None:
         self.cursor("sessionStart")
         output = self.cursor("beforeSubmitPrompt", prompt="$agent-efficiency vault")
         self.assertFalse(output["continue"])
-        self.assertIn("session start", output["user_message"])
+        self.assertIn("next successful tool result", output["user_message"])
         self.assertEqual(
             self.receipts("s-cursor")[-1],
             ("request", "unavailable", "host_unsupported"),
         )
+        reloaded = self.tool_result("s-cursor")["additional_context"]
+        self.assertIn(HEAD, reloaded)
+        self.assertIn(REPLACES, reloaded)
+        again = self.tool_result("s-cursor") or {}
+        self.assertNotIn(HEAD, again.get("additional_context", ""))
+        self.assertEqual(
+            [row[:2] for row in self.receipts("s-cursor")],
+            [
+                ("new", "delivered"),
+                ("request", "unavailable"),
+                ("request", "delivered"),
+            ],
+        )
+
+    def test_concurrent_tool_results_reload_the_cursor_request_once(self) -> None:
+        self.cursor("sessionStart", session="s-reload")
+        self.cursor(
+            "beforeSubmitPrompt", session="s-reload", prompt="$agent-efficiency vault"
+        )
+        with mock.patch.object(Store, "vault_request_pending", return_value=True):
+            results = [
+                _deferred_vault(self.store, "s-reload", str(self.project), "advise")
+                for _ in range(2)
+            ]
+        delivered = [
+            result
+            for result in results
+            if result and HEAD in result.get("additional_context", "")
+        ]
+        self.assertEqual(len(delivered), 1)
 
     def test_explicit_request_in_off_mode_records_nothing(self) -> None:
         self.claude("UserPromptSubmit", prompt="$agent-efficiency off")
@@ -554,9 +586,11 @@ class SessionStartDeliveryTests(VaultDeliveryBase):
         request = self.cursor(
             "beforeSubmitPrompt", session="s-cloud", prompt="$agent-efficiency vault"
         )
-        self.assertIn("first tool result", request["user_message"])
+        self.assertIn("next successful tool result", request["user_message"])
         output = self.tool_result("s-cloud")
         self.assertIn(HEAD, output["additional_context"])
+        again = self.tool_result("s-cloud") or {}
+        self.assertNotIn(HEAD, again.get("additional_context", ""))
         self.assertEqual(
             self.receipts("s-cloud"),
             [

@@ -53,9 +53,8 @@ VAULT_REQUEST_MESSAGES = {
     ),
     "observe_mode": "Observe mode records vault selection but does not add it.",
     "host_unsupported": (
-        "This host cannot add context from a prompt. Vault context is added "
-        "at session start, or at the first tool result when the host has no "
-        "session start."
+        "This host cannot add context from a prompt. Vault context will be "
+        "reloaded at the next successful tool result."
     ),
 }
 
@@ -843,6 +842,9 @@ def _deferred_vault(
     Cursor also sends no event after a compaction that can carry context. A
     compaction is recorded at ``preCompact``, and the next tool result delivers
     for it, once, as a compact delivery.
+
+    A Cursor prompt cannot carry context either, so an explicit vault request
+    is recorded as pending and the next tool result reloads it, once.
     """
 
     if not _vault_registered(store):
@@ -852,6 +854,8 @@ def _deferred_vault(
             cause = "deferred"
         elif store.vault_compaction_pending(session_id):
             cause = "compact"
+        elif store.vault_request_pending(session_id):
+            cause = "request"
         else:
             return None
     except (OSError, ValueError, sqlite3.Error):

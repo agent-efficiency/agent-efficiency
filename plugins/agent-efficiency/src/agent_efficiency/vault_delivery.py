@@ -93,7 +93,14 @@ def deliver_vault_context(
     mode: str,
     lead: str = "",
 ) -> Delivery:
-    """Select, render, and deliver. ``lead`` is host text placed before the vault."""
+    """Select, render, and deliver. ``lead`` is host text placed before the vault.
+
+    A ``request`` at a tool result reloads a request the host could not carry
+    at its prompt, so its receipt is recorded only while that request is still
+    pending.
+    """
+
+    claim_request = cause == "request" and event == "PostToolUse"
 
     try:
         prepared = prepare(cwd, store.paths.root)
@@ -109,29 +116,55 @@ def deliver_vault_context(
         # nothing to record.
         return Delivery(None, "unavailable", "no_trees")
     if cause == "compact" and not _compaction_due(store, session_id):
-        return _finish(store, session_id, cause, prepared, "skipped", "unchanged")
+        return _finish(
+            claim_request, store, session_id, cause, prepared, "skipped", "unchanged"
+        )
     if prepared.status == "unavailable":
-        return _finish(store, session_id, cause, prepared, "unavailable")
+        return _finish(claim_request, store, session_id, cause, prepared, "unavailable")
     if prepared.status == "degraded":
         output = None
         if mode != "observe" and can_add:
             notice = DEGRADED_NOTICE.format(reason=prepared.reason)
             output = _render(adapter, event, lead, notice)
-        return _finish(store, session_id, cause, prepared, "degraded", output=output)
+        return _finish(
+            claim_request, store, session_id, cause, prepared, "degraded", output=output
+        )
     if cause == "resume" and _unchanged(store, session_id, prepared.digest):
-        return _finish(store, session_id, cause, prepared, "skipped", "unchanged")
+        return _finish(
+            claim_request, store, session_id, cause, prepared, "skipped", "unchanged"
+        )
     if mode == "observe":
-        return _finish(store, session_id, cause, prepared, "withheld", "observe_mode")
+        return _finish(
+            claim_request,
+            store,
+            session_id,
+            cause,
+            prepared,
+            "withheld",
+            "observe_mode",
+        )
     if not can_add:
         return _finish(
-            store, session_id, cause, prepared, "unavailable", "host_unsupported"
+            claim_request,
+            store,
+            session_id,
+            cause,
+            prepared,
+            "unavailable",
+            "host_unsupported",
         )
     rendered = prepared.rendered
     text = _replacing(rendered.text) if cause in RESELECTED else rendered.text
     output = _render(adapter, event, lead, text)
     if output is None:
         return _finish(
-            store, session_id, cause, prepared, "unavailable", "host_unsupported"
+            claim_request,
+            store,
+            session_id,
+            cause,
+            prepared,
+            "unavailable",
+            "host_unsupported",
         )
     if cause == "deferred":
         disposition = "deferred"
@@ -140,6 +173,7 @@ def deliver_vault_context(
     else:
         disposition = "delivered"
     return _finish(
+        claim_request,
         store,
         session_id,
         cause,
@@ -194,6 +228,7 @@ def _unchanged(store: Store, session_id: str, digest: str) -> bool:
 
 
 def _finish(
+    claim_request: bool,
     store: Store,
     session_id: str,
     cause: str,
@@ -219,6 +254,16 @@ def _finish(
         "disposition": disposition,
         "reason_code": code,
     }
+    if claim_request:
+        # Several tool results can race to reload one pending request. Only
+        # the one that records the receipt sends its output.
+        try:
+            claimed = store.record_vault_request_receipt(session_id, **fields)
+        except (OSError, ValueError, sqlite3.Error):
+            return Delivery(None, disposition, code)
+        if claimed is None:
+            return Delivery(None, "skipped", "unchanged")
+        return Delivery(output, disposition, code)
     if cause == "compact" and disposition in VAULT_COMPACTION_HANDLED:
         # A session start after a compaction and a PostCompact event can race to
         # handle one compaction. Only the one that records the receipt sends its

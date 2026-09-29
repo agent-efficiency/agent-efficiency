@@ -1700,6 +1700,53 @@ class Store:
             compactions, handled = self._vault_compaction_counts(conn, session_id)
         return compactions > handled
 
+    def vault_request_pending(self, session_id: str) -> bool:
+        """Return whether a prompt reload is still waiting for a tool result.
+
+        A host that cannot add context from a prompt records the request as
+        ``host_unsupported``. It stays pending until a later receipt handled a
+        delivery, or a later request receipt recorded the reload.
+        """
+
+        self.ensure_current_schema()
+        with self.connect() as conn:
+            return self._vault_request_pending(conn, session_id)
+
+    def record_vault_request_receipt(
+        self, session_id: str, **fields: Any
+    ) -> int | None:
+        """Record the reload of a pending request, once.
+
+        The pending check and the insert share one immediate transaction, so
+        when several tool results race, exactly one records the reload. Return
+        the new row id, or ``None`` when nothing was pending.
+        """
+
+        row = self._vault_receipt_row(session_id, **fields)
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if not self._vault_request_pending(conn, session_id):
+                return None
+            return self._insert_vault_receipt(conn, row)
+
+    @staticmethod
+    def _vault_request_pending(conn: sqlite3.Connection, session_id: str) -> bool:
+        row = conn.execute(
+            f"""
+            SELECT
+                (SELECT COALESCE(MAX(id), 0) FROM vault_receipts
+                  WHERE session_id = ? AND cause = 'request'
+                    AND reason_code = 'host_unsupported'),
+                (SELECT COALESCE(MAX(id), 0) FROM vault_receipts
+                  WHERE session_id = ?
+                    AND (disposition IN ({_sql_choices(VAULT_COMPACTION_HANDLED)})
+                         OR (cause = 'request'
+                             AND COALESCE(reason_code, '') != 'host_unsupported')))
+            """,
+            (session_id, session_id),
+        ).fetchone()
+        return int(row[0]) > int(row[1])
+
     def record_vault_compaction_receipt(
         self, session_id: str, **fields: Any
     ) -> int | None:
