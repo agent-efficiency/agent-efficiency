@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -14,6 +15,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins" / "agent-efficiency"
+SELF = "scripts/validate_distribution.py"
 SRC = PLUGIN / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -41,6 +43,20 @@ TEXT_SUFFIXES = {
     ".yml",
 }
 RUNTIME_LIMIT_BYTES = 600 * 1024
+# Folders a checkout gains from local work, such as the virtual environment
+# the README's Develop section creates. They are skipped when the tree is not
+# a git work tree; inside one, only tracked files are read.
+UNTRACKED_FOLDERS = {
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "build",
+    "dist",
+}
 # Each host manifest must name its own hook file. Claude Code loads a plugin's
 # default hooks/hooks.json in addition to the file its manifest names, so the
 # package must not ship that default file for any host.
@@ -51,6 +67,59 @@ HOST_HOOK_FILES = {
 }
 
 
+def distribution_files(root: Path, under: Path | None = None) -> list[Path]:
+    """Return the files that make up the distribution, sorted.
+
+    In a git work tree whose top level is ``root``, that is the files git
+    tracks. Anywhere else, such as an exported archive, every file is walked
+    except those inside local work folders and packaging metadata.
+    """
+
+    base = under or root
+    tracked = _tracked_files(root)
+    if tracked is not None:
+        return sorted(
+            path
+            for path in tracked
+            if path.is_file() and path.resolve().is_relative_to(base.resolve())
+        )
+    return sorted(
+        path
+        for path in base.rglob("*")
+        if path.is_file()
+        and not any(
+            part in UNTRACKED_FOLDERS or part.endswith(".egg-info")
+            for part in path.relative_to(base).parts
+        )
+    )
+
+
+def _tracked_files(root: Path) -> list[Path] | None:
+    try:
+        top = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        ).stdout.strip()
+        if not top or Path(top).resolve() != root.resolve():
+            return None
+        listed = subprocess.run(
+            ["git", "ls-files", "-z", "--cached"],
+            cwd=root,
+            capture_output=True,
+            check=True,
+            timeout=30,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return [
+        root / name.decode("utf-8") for name in listed.split(b"\0") if name
+    ]
+
+
 def validate_distribution(root: Path = ROOT) -> dict[str, Any]:
     """Return standalone publication checks and stable failure messages."""
 
@@ -58,13 +127,11 @@ def validate_distribution(root: Path = ROOT) -> dict[str, Any]:
     references: list[str] = []
     broken_links: list[str] = []
     invalid_json: list[str] = []
-    for path in sorted(root.rglob("*")):
+    for path in distribution_files(root):
         if (
-            not path.is_file()
-            or ".git" in path.parts
-            or "__pycache__" in path.parts
-            or path.suffix not in TEXT_SUFFIXES
-            or path.resolve() == Path(__file__).resolve()
+            path.suffix not in TEXT_SUFFIXES
+            # This file names the forbidden terms in order to find them.
+            or path.relative_to(root).as_posix() == SELF
         ):
             continue
         try:
@@ -169,10 +236,8 @@ def validate_distribution(root: Path = ROOT) -> dict[str, Any]:
     policies = PolicyPack.load(root / ".validation-data")
     runtime_files = [
         path
-        for path in PLUGIN.rglob("*")
-        if path.is_file()
-        and "__pycache__" not in path.parts
-        and path.suffix not in {".pyc", ".pyo"}
+        for path in distribution_files(root, PLUGIN)
+        if path.suffix not in {".pyc", ".pyo"}
     ]
     runtime_bytes = sum(path.stat().st_size for path in runtime_files)
     if runtime_bytes > RUNTIME_LIMIT_BYTES:
