@@ -26,6 +26,7 @@ The lifecycle path:
 - makes no network requests;
 - makes no model calls;
 - uses only the Python standard library;
+- reads vault trees only from local files and never writes to them;
 - treats monitoring errors as non-blocking;
 - caps and deduplicates guidance;
 - requires project consent before guard behavior.
@@ -44,7 +45,8 @@ The local SQLite database can contain:
 - counts and durations;
 - verification receipt digests;
 - structured experiment labels and outcomes;
-- optional host-provided token and cost totals.
+- optional host-provided token and cost totals;
+- vault delivery receipts: counts, two digests, and fixed codes.
 
 It does not contain:
 
@@ -56,7 +58,12 @@ It does not contain:
 - transcript paths or content;
 - environment values;
 - verification output;
-- experiment task descriptions or evidence content.
+- experiment task descriptions or evidence content;
+- vault note text, note ids, titles, hooks, vault paths, remotes, or branches.
+
+The runtime data directory also holds `vault.json`, the list of registered
+vault tree paths. Vault note text goes only to the host session that receives
+it.
 
 Operational metadata can still be sensitive. Protect the database with normal
 developer filesystem permissions. Do not commit it.
@@ -69,6 +76,14 @@ size.
 
 Each session pins an exact pack digest. Runtime hooks do not download guidance
 or activate external content.
+
+## Vault guards
+
+The vault pre-commit and pre-push hooks check the content git is about to
+record or send, including every commit a push would carry. Findings name a
+rule, a location, and a fix. They never repeat matched secret material or note
+text. The secret scan matches known credential shapes only, so a clean result
+does not prove a tree holds no secret.
 
 ## Verification receipts
 

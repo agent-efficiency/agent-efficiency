@@ -12,6 +12,8 @@ flowchart LR
     E --> P[deterministic policies]
     E --> G[bundled guidance selector]
     E --> V[verification state]
+    E --> K[vault context]
+    K --> R
     P --> I[host-neutral intervention]
     G --> I
     V --> I
@@ -124,6 +126,46 @@ Validation checks:
 The first session event retains the pack by digest and records an immutable
 session pin. A running session does not change packs.
 
+## Vault context
+
+Vault context is a separate channel from guidance. It never counts against
+the advice budget and never appears in intervention measurement.
+
+```text
+registered trees (vault.json in the data directory)
+  -> each tree's index.json
+  -> selection by paths, repos, and branches for the working directory
+  -> rendering inside a 9,000 character allowance
+  -> host adapter output
+  -> closed vault receipt
+```
+
+Selection reads git metadata files directly and never starts a git process.
+It never opens a note body. Rendering places the matched project note in full
+and one line for each other note in scope, core first, and counts what did
+not fit.
+
+Delivery causes are `new`, `resume`, `compact`, `request`, and `deferred`.
+Resume delivers only when the rendered text changed.
+
+Each compaction is counted by its `PreCompact` event and delivers once. On
+Claude Code and Codex, the compact session start or `PostCompact` delivers,
+whichever arrives first. Cursor sends neither, so its next successful tool
+result delivers. The check that a compaction is still due and the insert of
+its receipt share one immediate SQLite transaction, so two racing events
+cannot both deliver.
+
+A request comes from the `vault` prompt control and always reselects. Claude
+Code and Codex deliver it at the prompt. A Cursor prompt cannot carry context,
+so the request is recorded as pending and the next successful tool result
+claims and delivers it, once. Cursor cloud agents have no session start, so
+their first successful tool result carries a deferred delivery. Compact and
+request deliveries say that they replace earlier vault context.
+
+The vault modules load only on the events that use them. Any vault error is
+contained at the delivery boundary, so the session continues without vault
+context.
+
 ## Modes
 
 `off`
@@ -177,8 +219,8 @@ The SQLite schema stores:
 - host capability observations;
 - guidance selections and ratings;
 - verification receipts;
-- vault delivery receipts, a closed record of each vault delivery decision
-  (counts, two digests, and fixed codes, never vault text);
+- vault delivery receipts (schema 7), a closed record of each vault delivery
+  decision (counts, two digests, and fixed codes, never vault text);
 - experiment enrollment and structured outcomes;
 - runtime samples.
 
@@ -232,6 +274,7 @@ plugins/agent-efficiency/
   skills/
   scripts/
   src/agent_efficiency/
+  src/agent_efficiency/vault/
 
 scripts/
   build_guidance_pack.py

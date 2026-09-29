@@ -30,6 +30,8 @@ standard library.
 - Reports observed failures, repeated work, verification, interventions,
   runtime overhead, and host-provided cost data.
 - Supports matched observe and advise experiments.
+- Loads a bounded block of your own project notes, a vault, into each new
+  session, chosen by the working directory.
 - Keeps prompts, source code, raw commands, outputs, assistant messages, and
   transcripts out of persistent storage.
 
@@ -65,10 +67,13 @@ $agent-efficiency observe
 $agent-efficiency guard
 $agent-efficiency off
 $agent-efficiency status
+$agent-efficiency vault
 ```
 
-`on` is an alias for `advise`. These controls are intercepted by the hook, so
-changing mode does not require a model response.
+`on` is an alias for `advise`. `vault` reloads vault context for the current
+directory; on Cursor the reload arrives with the next successful tool result.
+These controls are intercepted by the hook, so they do not require a model
+response.
 
 The CLI can also control the most recently observed session:
 
@@ -95,6 +100,19 @@ For local development:
 claude plugin marketplace add /absolute/path/to/agent-efficiency
 claude plugin install agent-efficiency@agent-efficiency
 ```
+
+To move an existing install to 0.2.0:
+
+```bash
+claude plugin marketplace update agent-efficiency
+claude plugin update agent-efficiency@agent-efficiency
+```
+
+Claude Code keeps a cached copy of the plugin until its version changes.
+Version 0.1.0 shipped a `hooks/hooks.json` file that Claude Code also loaded,
+so the Codex hook commands failed there on every event. Version 0.2.0 removes
+that file. `agent-efficiency doctor` reports Claude Code as not ready while a
+stale copy remains in the plugin folder.
 
 ## Install for Cursor
 
@@ -126,6 +144,9 @@ The Codex manifest names `plugins/agent-efficiency/hooks/codex-hooks.json`.
 Each host manifest names its own hook file. The package ships no
 `hooks/hooks.json` because Claude Code loads that default file in addition to
 the file its manifest names.
+
+Vault context uses the same install. See
+[Load vault context](#load-vault-context).
 
 ## Configure verification
 
@@ -208,6 +229,142 @@ agent-efficiency knowledge explain core.work-packet
 Running sessions pin the exact pack digest they started with. Runtime hooks do
 not fetch guidance or send project data to a remote service.
 
+## Load vault context
+
+A vault is a git repository of short markdown notes that you keep about your
+own work: the current state of each project and the standing rules you want
+every session to follow. Agent Efficiency reads registered vault trees and
+adds a bounded block of their notes to each new session. It never writes to a
+vault during a session.
+
+### Create and register a tree
+
+Each tree has one classification: `core`, `work`, or `private`. Core notes load
+in every session. A work or private tree loads when the working directory
+matches one of its project notes. Register at most one tree per
+classification.
+
+```bash
+agent-efficiency vault init ~/notes/vault-core --classification core \
+  --remote git@github.com:example/vault-core.git
+agent-efficiency vault init ~/notes/vault-work --classification work
+cd ~/notes/vault-core && git init && git config --local core.hooksPath .githooks
+```
+
+`vault init` writes a `.vault.json` marker, the note folders (`projects`,
+`feedback`, `reference`, `doctrine`, `sessions`), an empty index, and
+pre-commit and pre-push hooks in `.githooks`. Run the same `git` commands in
+each tree. The hooks check what git is about to commit or push: note
+classification, size caps, note schema, duplicate ids, the index, and known
+credential shapes. The pre-push hook also refuses a remote other than the one
+the marker names.
+
+A note is markdown with a small frontmatter block:
+
+```markdown
+---
+schema: 1
+id: app
+title: Example app
+type: project
+classification: work
+status: active
+hook: Current state and next step for example/app.
+repos: [example/app]
+---
+Next: finish the settings page, then cut a release.
+```
+
+`hook` is the one line the note adds to a session, at most 100 characters.
+A project note is capped at 3,000 characters and a feedback, reference, or
+doctrine note at 3,500. Frontmatter values are one scalar or one bracketed
+list. Unknown keys are refused.
+
+After you edit notes, rebuild the index and check the tree, then register it:
+
+```bash
+agent-efficiency vault index ~/notes/vault-work
+agent-efficiency vault check ~/notes/vault-work
+agent-efficiency vault register ~/notes/vault-core
+agent-efficiency vault register ~/notes/vault-work
+```
+
+Registered tree paths are kept in `vault.json` in the runtime data directory,
+not in the database.
+
+### What a session receives
+
+Selection reads each tree's generated `index.json` and the working directory's
+git metadata. It never runs git and never opens a note body to decide. The
+first match wins:
+
+1. The longest `paths` entry that contains the working directory.
+2. A `repos` entry that matches a remote of the repository, such as
+   `example/app`. A bare `owner/name` matches on any host.
+3. `branches` breaks an exact tie. A tie that remains is reported as
+   ambiguous and no project note loads.
+
+The matched project note renders in full. The active feedback, reference, and
+doctrine notes and the other active projects of the core tree, and of the tree
+that holds the match, render as one line each: the note path and its hook. The
+agent opens the file when a line applies. Core notes come first. With no
+match, only core notes are listed.
+
+The whole block has an allowance of 9,000 characters. Notes that do not fit
+are counted in a closing line, so an omission is visible.
+
+Preview exactly what a session in a directory would receive:
+
+```bash
+agent-efficiency vault show --cwd ~/code/app
+```
+
+Delivery by host:
+
+- Claude Code and Codex: at session start. Resume delivers again only when the
+  rendered text changed. After each compaction, it delivers once, at the
+  compact session start or at `PostCompact`, whichever comes first.
+- Cursor: at session start. Cursor cloud agents send no session start, so the
+  context arrives with the first successful tool result. Cursor sends no event
+  after a compaction that can carry context, so after each `preCompact` the
+  next successful tool result delivers it once.
+- `$agent-efficiency vault` reselects and delivers again. Claude Code and
+  Codex receive it at once. Cursor cannot add context from a prompt, so the
+  reload arrives with the next successful tool result, once.
+
+A delivery after a compaction or a reload is marked as replacing earlier vault
+context.
+
+In `observe` mode the selection is recorded and nothing is added. In `off`
+mode the vault is not read. A vault failure never blocks the session. When
+context is unavailable, the session gets one line saying why, and
+`agent-efficiency vault show` gives the detail.
+
+### Move existing notes into a vault
+
+`vault migrate propose` reads an existing folder of markdown memory notes and
+writes a proposal file with a guessed classification for each note. Edit the
+file, then apply it:
+
+```bash
+agent-efficiency vault migrate propose --memory-dir ~/notes/old-memory \
+  --out proposal.json
+agent-efficiency vault migrate apply proposal.json \
+  --tree work=$HOME/notes/vault-work --tree private=$HOME/notes/vault-private
+```
+
+Each classification used in the proposal needs a `--tree`, created first with
+`vault init`. The guess is a keyword hint only. Nothing is written until you
+apply the proposal. If any step of the apply fails, including rebuilding an
+index, every tree it touched is restored to what it was, index files included.
+
+### Vault privacy
+
+Note text goes from the vault to the host output and nowhere else. The
+database records one receipt per delivery decision with counts, two digests,
+and fixed codes. It never records note text, note ids, titles, hooks, vault
+paths, remotes, or branches. Reports show vault counts only.
+
 ## Reports
 
 ```bash
@@ -225,6 +382,7 @@ Reports can include:
 - subagent and compaction counts;
 - guidance and intervention counts;
 - local runtime percentiles;
+- vault context selected, emitted, deferred, and unavailable counts;
 - exact Claude cost and token totals when status-line input is configured.
 
 Reports describe observed activity. They do not claim that an intervention
@@ -278,7 +436,8 @@ persist:
 - tool output;
 - assistant messages;
 - transcripts;
-- environment values.
+- environment values;
+- vault note text or vault paths.
 
 Project basenames, host names, model names, timestamps, counters, classifications,
 and one-way fingerprints can still be sensitive operational data. Protect the
