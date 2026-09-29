@@ -317,6 +317,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         _emit(report if args.json else format_report(report), args.json)
         return 0
     if args.command == "explain":
+        if args.session and not store.get_session(args.session):
+            result = {"ok": False, "error": f"no recorded session {args.session}"}
+            _emit(result if args.json else _format_key_values(result), args.json)
+            return 1
         explanation = build_explanation(store, session_id=args.session, cwd=Path.cwd())
         if args.rate:
             intervention = explanation.get("intervention")
@@ -333,8 +337,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             explanation = build_explanation(
                 store, session_id=args.session, cwd=Path.cwd()
             )
+        # Nothing recorded yet is an answer, not an error.
         _emit(explanation if args.json else format_explanation(explanation), args.json)
-        return 0 if explanation.get("found") else 1
+        return 0
     if args.command == "doctor":
         result = _doctor(store)
         _emit(result if args.json else _format_doctor(result), args.json)
