@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -811,61 +812,91 @@ def _migrate(args: argparse.Namespace, store: Store) -> int:
     return 0 if result["supported"] else 1
 
 
-def _host_package_status() -> dict[str, dict[str, Any]]:
-    specs = {
-        "claude": (
-            PLUGIN_ROOT / ".claude-plugin" / "plugin.json",
-            PLUGIN_ROOT / "hooks" / "claude-hooks.json",
-            CLAUDE_EVENTS,
-            "${CLAUDE_PLUGIN_ROOT}",
-        ),
-        "cursor": (
-            PLUGIN_ROOT / ".cursor-plugin" / "plugin.json",
-            PLUGIN_ROOT / "hooks" / "cursor-hooks.json",
-            CURSOR_EVENTS,
-            "${CURSOR_PLUGIN_ROOT}",
-        ),
-        "codex": (
-            PLUGIN_ROOT / ".codex-plugin" / "plugin.json",
-            PLUGIN_ROOT / "hooks" / "codex-hooks.json",
-            CODEX_EVENTS,
-            "${PLUGIN_ROOT}",
-        ),
+HOST_SPECS = {
+    "claude": (CLAUDE_EVENTS, "${CLAUDE_PLUGIN_ROOT}"),
+    "cursor": (CURSOR_EVENTS, "${CURSOR_PLUGIN_ROOT}"),
+    "codex": (CODEX_EVENTS, "${PLUGIN_ROOT}"),
+}
+HOST_NAMES = {"claude": "Claude Code", "codex": "Codex", "cursor": "Cursor"}
+PLUGIN_ID_PREFIX = "agent-efficiency@"
+ALL_EFFECT_CAPABILITIES = {
+    "add_context",
+    "notify",
+    "deny_action",
+    "continue_turn",
+    "replace_action",
+}
+
+
+def _plugin_folder_status(root: Path, host: str) -> dict[str, Any]:
+    """Check one plugin folder as ``host`` loads it."""
+
+    expected_events, root_variable = HOST_SPECS[host]
+    manifest_path = root / f".{host}-plugin" / "plugin.json"
+    expected_hooks = f"./hooks/{host}-hooks.json"
+    hooks_path = root / "hooks" / f"{host}-hooks.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        # The manifest must name this host's hook file. Without it, a host
+        # falls back to the default hooks/hooks.json, which is not shipped.
+        manifest_ready = (
+            manifest.get("name") == "agent-efficiency"
+            and manifest.get("hooks") == expected_hooks
+        )
+        version = manifest.get("version")
+    except (OSError, ValueError, AttributeError):
+        manifest_ready = False
+        version = None
+    try:
+        document = json.loads(hooks_path.read_text(encoding="utf-8"))
+        hooks = document.get("hooks")
+        event_names = set(hooks) if isinstance(hooks, dict) else set()
+        commands = hooks.values() if isinstance(hooks, dict) else ()
+        command_text = json.dumps(list(commands))
+        hooks_ready = event_names == expected_events and root_variable in command_text
+    except (OSError, ValueError, AttributeError):
+        event_names = set()
+        hooks_ready = False
+    not_ready_reasons: list[str] = []
+    if not root.is_dir():
+        not_ready_reasons.append(f"the plugin folder {root} does not exist")
+    else:
+        if not manifest_ready:
+            not_ready_reasons.append(
+                f"{manifest_path} must be named agent-efficiency and set hooks "
+                f"to {expected_hooks}"
+            )
+        if not hooks_ready:
+            not_ready_reasons.append(
+                f"{hooks_path} must list the {host} events and use {root_variable}"
+            )
+        # Claude Code loads hooks/hooks.json in addition to the file its
+        # manifest names. A copy left over from an older release runs there
+        # with an empty plugin root and fails on every event. No release ships
+        # the file, so its presence is always stale.
+        stale = root / "hooks" / "hooks.json"
+        if stale.exists():
+            not_ready_reasons.append(
+                f"remove the stale default hook file {stale}: the host runs it "
+                "in addition to its own hook file, with an empty plugin root"
+            )
+    return {
+        "version": version,
+        "manifest_ready": manifest_ready,
+        "hooks_ready": hooks_ready,
+        "event_count": len(event_names),
+        "ready": not not_ready_reasons,
+        "not_ready_reasons": not_ready_reasons,
     }
-    # Claude Code loads hooks/hooks.json in addition to the file its manifest
-    # names. A copy left over from an older release runs there with an empty
-    # plugin root and fails on every event.
-    stale_default_hooks = PLUGIN_ROOT / "hooks" / "hooks.json"
+
+
+def _host_package_status() -> dict[str, dict[str, Any]]:
+    """Check the plugin files this command runs from, for every host."""
+
     result: dict[str, dict[str, Any]] = {}
-    for host, (
-        manifest_path,
-        hooks_path,
-        expected_events,
-        root_variable,
-    ) in specs.items():
-        expected_hooks = f"./{hooks_path.relative_to(PLUGIN_ROOT).as_posix()}"
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            # The manifest must name this host's hook file. Without it, a host
-            # falls back to the default hooks/hooks.json, which is not shipped.
-            manifest_ready = (
-                manifest.get("name") == "agent-efficiency"
-                and manifest.get("hooks") == expected_hooks
-            )
-        except (OSError, ValueError, json.JSONDecodeError):
-            manifest_ready = False
-        try:
-            document = json.loads(hooks_path.read_text(encoding="utf-8"))
-            hooks = document.get("hooks")
-            event_names = set(hooks) if isinstance(hooks, dict) else set()
-            commands = hooks.values() if isinstance(hooks, dict) else ()
-            command_text = json.dumps(list(commands))
-            hooks_ready = (
-                event_names == expected_events and root_variable in command_text
-            )
-        except (OSError, ValueError, json.JSONDecodeError):
-            event_names = set()
-            hooks_ready = False
+    for host in HOST_SPECS:
+        status = _plugin_folder_status(PLUGIN_ROOT, host)
+        status.pop("version")
         supported_capabilities = sorted(
             {
                 capability
@@ -873,42 +904,170 @@ def _host_package_status() -> dict[str, dict[str, Any]]:
                 for capability in capabilities
             }
         )
-        all_effect_capabilities = {
-            "add_context",
-            "notify",
-            "deny_action",
-            "continue_turn",
-            "replace_action",
-        }
-        not_ready_reasons: list[str] = []
-        if not manifest_ready:
-            not_ready_reasons.append(
-                f"{manifest_path.relative_to(PLUGIN_ROOT).as_posix()} must be "
-                f"named agent-efficiency and set hooks to {expected_hooks}"
-            )
-        if not hooks_ready:
-            not_ready_reasons.append(
-                f"{expected_hooks} must list the {host} events and use {root_variable}"
-            )
-        if host == "claude" and stale_default_hooks.exists():
-            not_ready_reasons.append(
-                "remove the stale default hook file hooks/hooks.json: Claude "
-                "Code runs it in addition to its own hook file, with an empty "
-                "plugin root"
-            )
         result[host] = {
             "cli_version": _tool_version(host),
-            "manifest_ready": manifest_ready,
-            "hooks_ready": hooks_ready,
-            "event_count": len(event_names),
+            **status,
             "supported_capabilities": supported_capabilities,
             "unsupported_capabilities": sorted(
-                all_effect_capabilities - set(supported_capabilities)
+                ALL_EFFECT_CAPABILITIES - set(supported_capabilities)
             ),
-            "ready": not not_ready_reasons,
-            "not_ready_reasons": not_ready_reasons,
         }
     return result
+
+
+def _installed_host_status() -> dict[str, dict[str, Any]]:
+    """Check the plugin each host actually installed, not this package."""
+
+    home = Path.home()
+    return {
+        "claude": _claude_installs(
+            Path(os.environ.get("CLAUDE_CONFIG_DIR") or home / ".claude")
+        ),
+        "codex": _codex_installs(Path(os.environ.get("CODEX_HOME") or home / ".codex")),
+        "cursor": _cursor_installs(home / ".cursor"),
+    }
+
+
+def _claude_installs(config: Path) -> dict[str, Any]:
+    record_path = config / "plugins" / "installed_plugins.json"
+    installs: list[dict[str, Any]] = []
+    try:
+        document = json.loads(record_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return _host_summary(installs)
+    except (OSError, ValueError) as exc:
+        return _host_summary(
+            installs, error=f"{record_path} could not be read: {exc}"
+        )
+    plugins = document.get("plugins") if isinstance(document, dict) else None
+    for plugin_id, records in (plugins or {}).items():
+        if not str(plugin_id).startswith(PLUGIN_ID_PREFIX):
+            continue
+        for record in records if isinstance(records, list) else [records]:
+            if not isinstance(record, dict):
+                continue
+            path = Path(str(record.get("installPath") or ""))
+            status = _plugin_folder_status(path, "claude")
+            install = {
+                "plugin": plugin_id,
+                "scope": record.get("scope") or "user",
+                "path": str(path),
+                "version": record.get("version") or status["version"],
+                "ready": status["ready"],
+                "not_ready_reasons": status["not_ready_reasons"],
+            }
+            if record.get("projectPath"):
+                install["project"] = str(record["projectPath"])
+            installs.append(install)
+    return _host_summary(installs)
+
+
+def _codex_installs(codex_home: Path) -> dict[str, Any]:
+    """Codex records an enabled plugin in config.toml and caches its files.
+
+    The cache holds one folder per installed version. The newest folder is the
+    one Codex loads, so that is the one checked.
+    """
+
+    config_path = codex_home / "config.toml"
+    try:
+        config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return _host_summary([])
+    except (OSError, ValueError) as exc:
+        return _host_summary([], error=f"{config_path} could not be read: {exc}")
+    plugins = config.get("plugins")
+    installs: list[dict[str, Any]] = []
+    disabled = False
+    for plugin_id, settings in (plugins if isinstance(plugins, dict) else {}).items():
+        if not str(plugin_id).startswith(PLUGIN_ID_PREFIX):
+            continue
+        if isinstance(settings, dict) and settings.get("enabled") is False:
+            disabled = True
+            continue
+        name, _, marketplace = str(plugin_id).partition("@")
+        cache = codex_home / "plugins" / "cache" / marketplace / name
+        try:
+            versions = [path for path in cache.iterdir() if path.is_dir()]
+        except OSError:
+            versions = []
+        if not versions:
+            installs.append(
+                {
+                    "plugin": plugin_id,
+                    "scope": "user",
+                    "path": str(cache),
+                    "version": None,
+                    "ready": False,
+                    "not_ready_reasons": [
+                        f"Codex lists {plugin_id} as enabled, but {cache} holds "
+                        "no installed copy; reinstall the plugin"
+                    ],
+                }
+            )
+            continue
+        active = max(versions, key=lambda path: path.stat().st_mtime)
+        status = _plugin_folder_status(active, "codex")
+        installs.append(
+            {
+                "plugin": plugin_id,
+                "scope": "user",
+                "path": str(active),
+                "version": status["version"] or active.name,
+                "ready": status["ready"],
+                "not_ready_reasons": status["not_ready_reasons"],
+            }
+        )
+    summary = _host_summary(installs)
+    if disabled and not installs:
+        summary.update(installed=True, status="disabled")
+    return summary
+
+
+def _cursor_installs(cursor_home: Path) -> dict[str, Any]:
+    local = cursor_home / "plugins" / "local" / "agent-efficiency"
+    if not local.exists() and not local.is_symlink():
+        return _host_summary([])
+    status = _plugin_folder_status(local, "cursor")
+    return _host_summary(
+        [
+            {
+                "plugin": "agent-efficiency (local)",
+                "scope": "user",
+                "path": str(local),
+                "version": status["version"],
+                "ready": status["ready"],
+                "not_ready_reasons": status["not_ready_reasons"],
+            }
+        ]
+    )
+
+
+def _host_summary(
+    installs: list[dict[str, Any]], *, error: str | None = None
+) -> dict[str, Any]:
+    if error:
+        return {
+            "installed": True,
+            "ready": False,
+            "status": "install record unreadable",
+            "installs": [],
+            "error": error,
+        }
+    if not installs:
+        return {
+            "installed": False,
+            "ready": None,
+            "status": "not installed",
+            "installs": [],
+        }
+    ready = all(install["ready"] for install in installs)
+    return {
+        "installed": True,
+        "ready": ready,
+        "status": "ready" if ready else "not ready",
+        "installs": installs,
+    }
 
 
 def _doctor(store: Store) -> dict[str, Any]:
@@ -930,6 +1089,7 @@ def _doctor(store: Store) -> dict[str, Any]:
         embedded_capability_pack_digest = None
 
     hosts = _host_package_status()
+    installed = _installed_host_status()
     data_dir_private = is_private(store.paths.root) and is_private(
         store.paths.database
     )
@@ -963,8 +1123,13 @@ def _doctor(store: Store) -> dict[str, Any]:
         "claude": hosts["claude"]["cli_version"],
         "cursor": hosts["cursor"]["cli_version"],
         "codex": hosts["codex"]["cli_version"],
+        "package_root": str(PLUGIN_ROOT),
         "hosts": hosts,
         "host_packages_ready": all(host["ready"] for host in hosts.values()),
+        "installed_hosts": installed,
+        "installed_hosts_ready": all(
+            host["ready"] is not False for host in installed.values()
+        ),
         "fetch_observation_limit": (
             "an observed fetch does not prove remote freshness"
         ),
@@ -977,6 +1142,7 @@ def _doctor(store: Store) -> dict[str, Any]:
         and checks["active_policy_count"]
         and checks["embedded_capability_pack_ready"]
         and checks["host_packages_ready"]
+        and checks["installed_hosts_ready"]
     )
     return checks
 
@@ -1018,8 +1184,8 @@ DOCTOR_TEXT_KEYS = (
     "claude",
     "cursor",
     "codex",
-    "host_packages_ready",
     "hosts",
+    "installed_hosts",
     "fetch_observation_limit",
     "privacy",
 )
@@ -1028,9 +1194,52 @@ DOCTOR_TEXT_KEYS = (
 def _format_doctor(result: dict[str, Any]) -> str:
     lines = [f"Agent Efficiency doctor: {'OK' if result['ok'] else 'FAILED'}"]
     for key in DOCTOR_TEXT_KEYS:
-        if key in result:
-            lines.append(f"{key}: {result[key]}")
+        if key not in result:
+            continue
+        value = result[key]
+        if key == "hosts":
+            lines.extend(_format_package(result.get("package_root"), value))
+        elif key == "installed_hosts":
+            lines.extend(_format_installed(value))
+        elif key == "unused_data_dirs":
+            if not value:
+                lines.append(f"{key}: none")
+            else:
+                lines.append(f"{key}:")
+                lines.extend(f"  {item['path']}: {item['status']}" for item in value)
+        else:
+            lines.append(f"{key}: {value}")
     return "\n".join(lines)
+
+
+def _format_package(root: Any, hosts: dict[str, Any]) -> list[str]:
+    ready = all(host["ready"] for host in hosts.values())
+    lines = [f"Package files at {root}: {'ready' if ready else 'not ready'}"]
+    for host, status in hosts.items():
+        lines.extend(
+            f"  {HOST_NAMES[host]}: {reason}" for reason in status["not_ready_reasons"]
+        )
+    return lines
+
+
+def _format_installed(installed: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
+    for host, summary in installed.items():
+        name = HOST_NAMES[host]
+        if summary.get("error"):
+            lines.append(f"{name}: {summary['status']}: {summary['error']}")
+            continue
+        if not summary["installs"]:
+            lines.append(f"{name}: {summary['status']}")
+            continue
+        for install in summary["installs"]:
+            state = "ready" if install["ready"] else "not ready"
+            lines.append(
+                f"{name}: {state}, {install['version']} "
+                f"({install['scope']} scope) at {install['path']}"
+            )
+            lines.extend(f"  fix: {reason}" for reason in install["not_ready_reasons"])
+    return lines
 
 
 def _format_key_values(value: dict[str, Any]) -> str:
