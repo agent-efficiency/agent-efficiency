@@ -25,6 +25,7 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
+from agent_efficiency import __version__
 from agent_efficiency.host_data import settle_data_dir
 from agent_efficiency.vault import gitcontent
 from agent_efficiency.vault.config import (
@@ -81,15 +82,31 @@ VAULT_ERRORS = (
 DIRECTORIES = ("projects", "feedback", "reference", "doctrine", "sessions")
 HOOKS_DIRECTORY = ".githooks"
 
+INSTALL_COMMAND = (
+    "pipx install git+https://github.com/agent-efficiency/"
+    f"agent-efficiency@v{__version__}"
+)
+
+# The hooks are privacy guards, so they fail closed: without the command they
+# stop the commit or push, and say why and how to install it.
+REQUIRE_COMMAND = """if ! command -v agent-efficiency >/dev/null 2>&1; then
+  echo "agent-efficiency vault: this {action} was stopped because the" >&2
+  echo "agent-efficiency command is not on PATH, so the vault checks could not run." >&2
+  echo "Install the command with:" >&2
+  echo "  {install}" >&2
+  exit 1
+fi
+"""
+
 PRE_COMMIT = """#!/bin/sh
 # Installed by: agent-efficiency vault init
 # --staged checks the content of the git index, which is what this commit will
 # hold. The working copy is a different thing and is not what is being
 # committed.
 set -e
-root=$(git rev-parse --show-toplevel)
+{require}root=$(git rev-parse --show-toplevel)
 exec agent-efficiency vault check "$root" --staged
-"""
+""".format(require=REQUIRE_COMMAND.format(action="commit", install=INSTALL_COMMAND))
 
 PRE_PUSH = """#!/bin/sh
 # Installed by: agent-efficiency vault init
@@ -97,9 +114,9 @@ PRE_PUSH = """#!/bin/sh
 # being pushed on standard input. --push reads those refs and checks the
 # commits and blobs the push would send.
 set -e
-root=$(git rev-parse --show-toplevel)
+{require}root=$(git rev-parse --show-toplevel)
 exec agent-efficiency vault check "$root" --push --remote "$2"
-"""
+""".format(require=REQUIRE_COMMAND.format(action="push", install=INSTALL_COMMAND))
 
 HOOKS = (("pre-commit", PRE_COMMIT), ("pre-push", PRE_PUSH))
 

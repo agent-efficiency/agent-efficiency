@@ -264,7 +264,9 @@ pre-commit and pre-push hooks in `.githooks`. Run the same `git` commands in
 each tree. The hooks check what git is about to commit or push: note
 classification, size caps, note schema, duplicate ids, whether `index.json`
 matches the notes, and known credential shapes. The pre-push hook also refuses a remote other than the one
-the marker names.
+the marker names. The hooks run the `agent-efficiency` command, so it must be
+on PATH. Without it they stop the commit or push and print how to install it.
+Run `vault init` again on an existing tree to update its hooks.
 
 A note is markdown with a small frontmatter block:
 

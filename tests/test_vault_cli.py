@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import stat
 import tempfile
 import unittest
@@ -101,6 +102,56 @@ class VaultInitTests(unittest.TestCase):
             push = (hooks / "pre-push").read_text(encoding="utf-8")
             self.assertIn("vault check", push)
             self.assertIn("--remote", push)
+
+    def run_hook_without_the_command(self, root: Path, name: str):
+        import subprocess
+
+        from vault_fixtures import git
+
+        git(root, "init", "-q", "-b", "main")
+        bare = Path(root).parent / "bin"
+        bare.mkdir()
+        for tool in ("git", "sh", "dirname"):
+            found = shutil.which(tool)
+            if found:
+                (bare / tool).symlink_to(found)
+        return subprocess.run(
+            [str(root / ".githooks" / name), "origin", "git@example.invalid:x.git"],
+            cwd=root,
+            env={"PATH": str(bare), "HOME": str(root.parent)},
+            input="",
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_hooks_stop_with_install_advice_when_the_command_is_missing(self) -> None:
+        from agent_efficiency import __version__
+
+        install = (
+            "pipx install git+https://github.com/agent-efficiency/"
+            f"agent-efficiency@v{__version__}"
+        )
+        for name, action in (("pre-commit", "commit"), ("pre-push", "push")):
+            with self.subTest(hook=name), tempfile.TemporaryDirectory() as raw:
+                root = Path(raw) / "vault-core"
+                run(["vault", "init", str(root), "--classification", "core"])
+                result = self.run_hook_without_the_command(root, name)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f"this {action} was stopped", result.stderr)
+                self.assertIn("agent-efficiency command", result.stderr)
+                self.assertIn(install, result.stderr)
+                self.assertNotIn("not found", result.stderr)
+
+    def test_init_on_an_existing_tree_updates_the_hooks(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw) / "vault-core"
+            run(["vault", "init", str(root), "--classification", "core"])
+            hook = root / ".githooks" / "pre-commit"
+            hook.write_text("#!/bin/sh\nexec agent-efficiency old\n", encoding="utf-8")
+            code, _ = run(["vault", "init", str(root), "--classification", "core"])
+            self.assertEqual(code, 0)
+            self.assertIn("pipx install", hook.read_text(encoding="utf-8"))
 
     def test_hooks_check_git_content_rather_than_the_working_copy(self) -> None:
         """The flags are the difference between checking a commit and a folder."""
