@@ -270,6 +270,55 @@ class InstalledHostTests(unittest.TestCase):
         self.assertIn("hooks/hooks.json", reasons)
         self.assertIn(str(installed), reasons)
 
+    def test_an_install_missing_its_hook_script_fails(self) -> None:
+        for missing in (
+            "scripts/agent_efficiency_hook.py",
+            "src/agent_efficiency/hook.py",
+        ):
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as temp:
+                home = Path(temp)
+                installed = plugin_copy(home / "cache" / "0.2.1")
+                (installed / missing).unlink()
+                claude_install(home, [claude_record(installed)])
+                code, doctor = self.doctor(home)
+                self.assertEqual(code, 1)
+                install = doctor["installed_hosts"]["claude"]["installs"][0]
+                self.assertFalse(install["ready"])
+                self.assertIn(
+                    str(installed / missing), " ".join(install["not_ready_reasons"])
+                )
+
+    def test_a_cursor_install_missing_its_hook_script_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp)
+            local = home / ".cursor" / "plugins" / "local"
+            local.mkdir(parents=True)
+            installed = plugin_copy(local / "agent-efficiency")
+            self.assertEqual(self.doctor(home)[0], 0)
+            (installed / "scripts" / "agent_efficiency_hook.py").unlink()
+            code, doctor = self.doctor(home)
+        self.assertEqual(code, 1)
+        self.assertFalse(doctor["installed_hosts"]["cursor"]["ready"])
+
+    def test_a_hook_command_that_leaves_the_install_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp)
+            installed = plugin_copy(home / "cache" / "0.2.1")
+            hooks = installed / "hooks" / "claude-hooks.json"
+            hooks.write_text(
+                hooks.read_text(encoding="utf-8").replace(
+                    "/scripts/agent_efficiency_hook.py", "/../elsewhere/hook.py", 1
+                ),
+                encoding="utf-8",
+            )
+            claude_install(home, [claude_record(installed)])
+            code, doctor = self.doctor(home)
+        self.assertEqual(code, 1)
+        reasons = " ".join(
+            doctor["installed_hosts"]["claude"]["installs"][0]["not_ready_reasons"]
+        )
+        self.assertIn("outside the plugin folder", reasons)
+
     def test_install_record_pointing_at_a_missing_folder_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             home = Path(temp)

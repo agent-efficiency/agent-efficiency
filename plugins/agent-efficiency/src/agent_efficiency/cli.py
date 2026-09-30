@@ -7,6 +7,7 @@ import fnmatch
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -921,9 +922,11 @@ def _plugin_folder_status(root: Path, host: str) -> dict[str, Any]:
         commands = hooks.values() if isinstance(hooks, dict) else ()
         command_text = json.dumps(list(commands))
         hooks_ready = event_names == expected_events and root_variable in command_text
+        referenced = _hook_command_paths(hooks, root_variable)
     except (OSError, ValueError, AttributeError):
         event_names = set()
         hooks_ready = False
+        referenced = set()
     not_ready_reasons: list[str] = []
     if not root.is_dir():
         not_ready_reasons.append(f"the plugin folder {root} does not exist")
@@ -937,6 +940,7 @@ def _plugin_folder_status(root: Path, host: str) -> dict[str, Any]:
             not_ready_reasons.append(
                 f"{hooks_path} must list the {host} events and use {root_variable}"
             )
+        not_ready_reasons.extend(_missing_runtime_files(root, referenced))
         # Claude Code loads hooks/hooks.json in addition to the file its
         # manifest names. A copy left over from an older release runs there
         # with an empty plugin root and fails on every event. No release ships
@@ -955,6 +959,58 @@ def _plugin_folder_status(root: Path, host: str) -> dict[str, Any]:
         "ready": not not_ready_reasons,
         "not_ready_reasons": not_ready_reasons,
     }
+
+
+# Files every hook command needs besides the script it names: the package the
+# script loads. Every release so far has shipped these two.
+HOOK_RUNTIME_FILES = (
+    "src/agent_efficiency/__init__.py",
+    "src/agent_efficiency/hook.py",
+)
+
+
+def _hook_command_paths(hooks: dict[str, Any], root_variable: str) -> set[str]:
+    """Return the paths below the plugin root that the hook commands name."""
+
+    pattern = re.compile(re.escape(root_variable) + r"/([^\"'\s]+)")
+    found: set[str] = set()
+    for groups in hooks.values():
+        for group in groups if isinstance(groups, list) else []:
+            if not isinstance(group, dict):
+                continue
+            # Claude Code and Codex nest commands under "hooks"; Cursor lists
+            # them directly.
+            entries = group.get("hooks", [group])
+            for entry in entries if isinstance(entries, list) else []:
+                command = entry.get("command") if isinstance(entry, dict) else None
+                if isinstance(command, str):
+                    found.update(pattern.findall(command))
+    return found
+
+
+def _missing_runtime_files(root: Path, referenced: set[str]) -> list[str]:
+    """Explain each file a hook command needs that is missing from ``root``."""
+
+    reasons = []
+    if not referenced:
+        reasons.append(
+            "the hook commands name no script in the plugin folder; reinstall "
+            "the plugin"
+        )
+    resolved_root = root.resolve()
+    for relative in sorted(referenced) + list(HOOK_RUNTIME_FILES):
+        target = (root / relative).resolve()
+        if not target.is_relative_to(resolved_root):
+            reasons.append(
+                f"a hook command runs {root / relative}, which is outside the "
+                "plugin folder; reinstall the plugin"
+            )
+        elif not target.is_file():
+            reasons.append(
+                f"{root / relative} is missing, so the hooks cannot run; "
+                "reinstall the plugin"
+            )
+    return reasons
 
 
 def _host_package_status() -> dict[str, dict[str, Any]]:
