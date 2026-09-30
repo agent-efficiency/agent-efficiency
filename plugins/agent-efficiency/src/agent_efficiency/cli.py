@@ -28,7 +28,11 @@ from agent_efficiency.capability_retrieval import (
 )
 from agent_efficiency.hook import format_session_status
 from agent_efficiency.claude_folder import claude_paths, folder_status
-from agent_efficiency.host_data import settle_data_dir, unused_host_stores
+from agent_efficiency.host_data import (
+    CopyPending,
+    settle_data_dir,
+    unused_host_stores,
+)
 from agent_efficiency.models import VALID_MODES
 from agent_efficiency.paths import (
     PACKAGE_DIR,
@@ -306,7 +310,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         # No vault command reads the database, so dispatch before the store is
         # built. A git hook must still work when the data directory does not.
         return vault_commands.dispatch(args)
-    store = Store(settle_data_dir(args.data_dir, discover=True))
+    try:
+        store = Store(settle_data_dir(args.data_dir))
+    except CopyPending as exc:
+        if args.command == "doctor":
+            folder = Path(args.cwd) if args.cwd else Path.cwd()
+            result = _doctor(None, folder, root=exc.target, copy_error=str(exc))
+            _emit(result if args.json else _format_doctor(result), args.json)
+            return 1
+        print(str(exc), file=sys.stderr)
+        return 2
     if args.command in {"on", "off", "observe", "advise", "guard", "mode"}:
         return _mode(args, store)
     if args.command == "status":
@@ -499,7 +512,7 @@ def _statusline(args: argparse.Namespace) -> int:
         payload = json.load(sys.stdin)
         if not isinstance(payload, dict):
             raise ValueError("status input must be an object")
-        store = Store(settle_data_dir(args.data_dir, discover=True))
+        store = Store(settle_data_dir(args.data_dir))
         print(process_statusline(payload, store))
     except Exception:
         print("AE unavailable")
@@ -1151,7 +1164,19 @@ def _host_summary(
     }
 
 
-def _doctor(store: Store, folder: Path | None = None) -> dict[str, Any]:
+def _doctor(
+    store: Store | None,
+    folder: Path | None = None,
+    *,
+    root: Path | None = None,
+    copy_error: str | None = None,
+) -> dict[str, Any]:
+    """Check the installation. ``store`` is None while an old store waits to
+    be copied; doctor then reports why and creates nothing."""
+
+    root = store.paths.root if store is not None else root
+    assert root is not None
+    database = root / "agent-efficiency.db"
     try:
         capability_pack = load_bundled_capability_pack()
         capability_pack_policies(capability_pack)
@@ -1193,17 +1218,15 @@ def _doctor(store: Store, folder: Path | None = None) -> dict[str, Any]:
             f"{hook_path} is Python {hook_version}; hooks need Python "
             f"{minimum_python} or newer. Put a newer python3 on PATH."
         )
-    data_dir_private = is_private(store.paths.root) and is_private(
-        store.paths.database
-    )
+    data_dir_private = is_private(root) and is_private(database)
     checks: dict[str, Any] = {
         "runtime_version": __version__,
         "python": platform.python_version(),
         "python_minimum": minimum_python,
         "python_supported": unsupported_python_message(sys.version_info) is None,
         "hook_python": hook_python,
-        "data_dir": str(store.paths.root),
-        "data_dir_writable": os.access(store.paths.root, os.W_OK),
+        "data_dir": str(root),
+        "data_dir_writable": os.access(root, os.W_OK),
         "data_dir_private": data_dir_private,
         "data_dir_permissions": (
             "only you can read the data folder"
@@ -1211,14 +1234,17 @@ def _doctor(store: Store, folder: Path | None = None) -> dict[str, Any]:
             else (
                 "other users can read the data folder. Agent Efficiency does "
                 "not change the mode of a folder it did not create. To make it "
-                f"private, run: chmod -R go-rwx {store.paths.root}"
+                f"private, run: chmod -R go-rwx {root}"
             )
         ),
-        "unused_data_dirs": unused_host_stores(store.paths.root, os.environ),
-        "database": str(store.paths.database),
-        "database_ready": store.paths.database.is_file(),
-        "default_mode": store.default_mode(),
-        "active_policy_count": len(PolicyPack.load(store.paths.root).ids()),
+        "data_copy": copy_error,
+        "unused_data_dirs": unused_host_stores(
+            root, os.environ, copy_error=copy_error
+        ),
+        "database": str(database),
+        "database_ready": database.is_file(),
+        "default_mode": store.default_mode() if store is not None else None,
+        "active_policy_count": len(PolicyPack.load(root).ids()),
         "embedded_capability_pack_ready": embedded_capability_pack_ready,
         "embedded_capability_pack_error": embedded_capability_pack_error,
         "embedded_capability_pack_id": embedded_capability_pack_id,
@@ -1314,6 +1340,7 @@ DOCTOR_TEXT_KEYS = (
     "hook_python",
     "data_dir",
     "data_dir_permissions",
+    "data_copy",
     "unused_data_dirs",
     "database",
     "default_mode",

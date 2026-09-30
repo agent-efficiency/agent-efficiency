@@ -18,7 +18,7 @@ from agent_efficiency.capability_retrieval import (
     select_capability,
 )
 from agent_efficiency.contracts.effects import CanonicalEffect
-from agent_efficiency.host_data import settle_data_dir
+from agent_efficiency.host_data import CopyPending, hook_deadline, settle_data_dir
 from agent_efficiency.interventions import render_intervention
 from agent_efficiency.models import Nudge
 from agent_efficiency.verification.config import load_project_config
@@ -69,7 +69,15 @@ def run_hook(
     """Process one host hook and record privacy-safe full-path health."""
 
     hook_started_ns = time.perf_counter_ns()
-    active_store = store or Store(settle_data_dir(environ=environ))
+    if store is None:
+        try:
+            store = Store(settle_data_dir(environ=environ, deadline=hook_deadline()))
+        except CopyPending:
+            # An old store is still being copied. Recording this event would
+            # start a new store without that history, so record nothing; the
+            # next event tries the copy again.
+            return None
+    active_store = store
     outcome = "success"
     try:
         return _run_hook(payload, store=active_store, environ=environ)

@@ -3,14 +3,28 @@
 Releases before 0.2.1 let a host's plugin data variable choose the data
 folder, so hooks under Claude Code and Codex wrote to the host's plugin data
 folder while the terminal command used the default folder. Every entry point
-now uses the default folder. To keep the history those hooks recorded, the
-first run that finds no database in the data folder copies a host store into
-it once.
+now uses the default folder. To keep the history those hooks recorded, a store
+found in a host plugin data folder is copied into the default folder once.
 
-The copy is safe when several hook processes start together. One process
-holds a lock file while it copies, the database goes in through the SQLite
-backup API, and every file is written under a temporary name and then linked
-into place, which never replaces a file that is already there.
+The copy is pending while an old store exists and the default folder has no
+database. The rules that keep old history from being lost:
+
+* While a copy is pending, nothing creates a new database in the default
+  folder. A caller that cannot finish the copy gets ``CopyPending`` and must
+  not build a store; a hook then records nothing for that event, and the next
+  event tries again.
+* One process copies at a time, under an operating system lock that is
+  released when its holder exits, however it exits. The lock file itself is
+  left in place; removing it could let two processes hold two locks.
+* A hook copies against a deadline well inside its time limit: a short wait
+  for the lock, and a stepped SQLite backup that stops at the deadline. The
+  terminal command has no deadline, so it can finish a copy hooks could not.
+* Everything is written under a temporary name and then linked into place,
+  which never replaces a file that is already there. The database goes last,
+  so its presence means the copy is complete. Temporary files left by a
+  copier that stopped are removed under the lock before the next attempt.
+
+A folder named by --data-dir or AGENT_EFFICIENCY_DATA never receives a copy.
 """
 
 from __future__ import annotations
@@ -20,10 +34,10 @@ import os
 import sqlite3
 import tempfile
 import time
-from contextlib import closing
+from contextlib import closing, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterator, Mapping
 
 from agent_efficiency.paths import (
     create_private_file,
@@ -32,53 +46,76 @@ from agent_efficiency.paths import (
     make_private_dir,
 )
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows
+    fcntl = None  # type: ignore[assignment]
+    import msvcrt
+
 DATABASE_NAME = "agent-efficiency.db"
+DATABASE_SIDECARS = ("-wal", "-shm", "-journal")
 COPY_RECORD = "plugin-data-copy.json"
 LOCK_NAME = ".plugin-data-copy.lock"
-LOCK_STALE_SECONDS = 60
-WAIT_SECONDS = 1.0
+STAGING_SUFFIX = ".copy.tmp"
+# A hook has two seconds. Starting Python takes a few hundred milliseconds,
+# so the lock wait and the copy together get one second.
+HOOK_COPY_SECONDS = 1.0
 POLL_SECONDS = 0.02
+BACKUP_PAGES = 256
 # Host variables that name a plugin data folder. They no longer choose the
 # data folder; they only say where an older store may be.
 HOST_DATA_VARIABLES = ("CLAUDE_PLUGIN_DATA", "PLUGIN_DATA")
 SKIPPED_NAMES = {
     DATABASE_NAME,
-    f"{DATABASE_NAME}-wal",
-    f"{DATABASE_NAME}-shm",
-    f"{DATABASE_NAME}-journal",
+    *(f"{DATABASE_NAME}{suffix}" for suffix in DATABASE_SIDECARS),
     COPY_RECORD,
     LOCK_NAME,
 }
+
+
+class CopyPending(Exception):
+    """An old store is waiting to be copied and the copy did not finish."""
+
+    def __init__(self, source: Path, target: Path, reason: str) -> None:
+        self.source = source
+        self.target = target
+        self.reason = reason
+        super().__init__(
+            f"Agent Efficiency could not finish copying the earlier data store "
+            f"at {source} into {target}: {reason}. Nothing was changed. Run the "
+            f"command again; if it keeps failing, move {source} aside to start "
+            "with an empty store."
+        )
+
+
+class _DeadlinePassed(Exception):
+    """The copy ran out of time. The caller turns this into CopyPending."""
+
+
+def hook_deadline() -> float:
+    """Return the deadline a hook copies against."""
+
+    return time.monotonic() + HOOK_COPY_SECONDS
 
 
 def settle_data_dir(
     explicit: str | Path | None = None,
     environ: Mapping[str, str] | None = None,
     *,
-    discover: bool = False,
+    deadline: float | None = None,
 ) -> Path:
-    """Return the data folder, first copying a host store into it when due.
+    """Return the data folder, first finishing a pending copy into it.
 
-    A hook passes ``discover=False`` and copies only from the folder its host
-    variables name. The terminal command passes ``discover=True`` so it also
-    finds a store in the host plugin data folders. Either way the copy goes
-    only into the default folder, never into one chosen with --data-dir or
-    AGENT_EFFICIENCY_DATA. A failed copy never stops the caller.
+    Raises ``CopyPending`` when an old store is waiting and the copy could not
+    finish, so the caller never builds a new store over missing history. With
+    no ``deadline`` the copy waits as long as it needs.
     """
 
     env = os.environ if environ is None else environ
     target = data_dir(explicit, env)
-    if data_dir_is_chosen(explicit, env):
+    if data_dir_is_chosen(explicit, env) or (target / DATABASE_NAME).exists():
         return target
-    candidates = host_data_dirs(env)
-    if discover:
-        for folder in installed_host_data_dirs(env):
-            if folder not in candidates:
-                candidates.append(folder)
-    try:
-        adopt_host_store(target, env, candidates=candidates)
-    except (OSError, sqlite3.Error, ValueError):
-        pass
+    adopt_host_store(target, env, deadline=deadline)
     return target
 
 
@@ -99,8 +136,8 @@ def host_data_dirs(environ: Mapping[str, str]) -> list[Path]:
 def installed_host_data_dirs(environ: Mapping[str, str]) -> list[Path]:
     """Return plugin data folders that Claude Code and Codex keep for this plugin.
 
-    These are found without any host variable, so the terminal command and
-    doctor can see a store that only hooks used to write.
+    These are found without any host variable, so every entry point sees a
+    store that only hooks of another host used to write.
     """
 
     home = Path(environ.get("HOME") or Path.home())
@@ -120,149 +157,137 @@ def installed_host_data_dirs(environ: Mapping[str, str]) -> list[Path]:
     return found
 
 
+def candidate_sources(target: Path, environ: Mapping[str, str]) -> list[Path]:
+    """Return host folders holding a store, the host variables' folders first."""
+
+    folders = host_data_dirs(environ)
+    for folder in installed_host_data_dirs(environ):
+        if folder not in folders:
+            folders.append(folder)
+    return [
+        folder
+        for folder in folders
+        if folder != target and (folder / DATABASE_NAME).is_file()
+    ]
+
+
 def adopt_host_store(
     target: Path,
     environ: Mapping[str, str],
     *,
     candidates: list[Path] | None = None,
+    deadline: float | None = None,
 ) -> Path | None:
     """Copy a host store into ``target`` once. Return the folder copied, or None.
 
     Nothing happens when ``target`` already has a database, or when no
-    candidate folder has one. ``candidates`` defaults to the folders the host
-    variables name.
+    candidate folder has one. Raises ``CopyPending`` when a copy is due and
+    did not finish.
     """
 
     target = target.expanduser().resolve()
     database = target / DATABASE_NAME
     if database.exists():
         return None
-    folders = host_data_dirs(environ) if candidates is None else candidates
-    source = next(
-        (
-            folder
-            for folder in folders
-            if folder != target and (folder / DATABASE_NAME).is_file()
-        ),
-        None,
+    sources = (
+        candidate_sources(target, environ)
+        if candidates is None
+        else [folder for folder in candidates if (folder / DATABASE_NAME).is_file()]
     )
-    if source is None:
+    if not sources:
         return None
-    make_private_dir(target)
-    lock = target / LOCK_NAME
-    if not _acquire(lock):
-        _wait(database, lock)
-        return None
+    source = sources[0]
     try:
-        if database.exists():
-            return None
-        _copy_state_files(source, target)
-        if not _copy_database(source / DATABASE_NAME, database):
-            return None
+        make_private_dir(target)
+        with copy_lock(target, deadline):
+            if database.exists():
+                return None
+            _remove_staging(target)
+            try:
+                _copy_state_files(source, target, deadline)
+                if not _copy_database(source / DATABASE_NAME, database, deadline):
+                    return None
+            finally:
+                _remove_staging(target)
+    except _DeadlinePassed:
+        raise CopyPending(source, target, "it did not finish in time") from None
+    except (OSError, sqlite3.Error) as exc:
+        raise CopyPending(source, target, str(exc) or type(exc).__name__) from None
+    try:
         _write_record(target, source)
-        return source
-    finally:
-        lock.unlink(missing_ok=True)
+    except OSError:
+        # The record only dates the copy. Doctor compares the stores
+        # themselves, so a missing record does not hide a finished copy.
+        pass
+    return source
 
 
-def copied_from(target: Path) -> Path | None:
-    """Return the folder a store was copied from, if it was copied."""
+@contextmanager
+def copy_lock(target: Path, deadline: float | None) -> Iterator[None]:
+    """Hold the copy lock for ``target``, waiting at most until ``deadline``."""
 
+    descriptor = os.open(target / LOCK_NAME, os.O_RDWR | os.O_CREAT, 0o600)
     try:
-        record = json.loads((target / COPY_RECORD).read_text(encoding="utf-8"))
-        return Path(str(record["source"]))
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
-
-
-def unused_host_stores(
-    target: Path, environ: Mapping[str, str]
-) -> list[dict[str, Any]]:
-    """Describe each host store that exists but is no longer read."""
-
-    target = target.expanduser().resolve()
-    source = copied_from(target)
-    unused: list[dict[str, Any]] = []
-    folders = host_data_dirs(environ)
-    for folder in installed_host_data_dirs(environ):
-        if folder not in folders:
-            folders.append(folder)
-    for folder in folders:
-        if folder == target or not (folder / DATABASE_NAME).is_file():
-            continue
-        copied = folder == source
-        unused.append(
-            {
-                "path": str(folder),
-                "copied": copied,
-                "status": (
-                    f"copied into {target}; nothing reads this folder now"
-                    if copied
-                    else (
-                        f"not copied, because {target} already had its own "
-                        "data; nothing reads this folder now"
-                    )
-                ),
-            }
-        )
-    return unused
-
-
-def _acquire(lock: Path) -> bool:
-    for _ in range(2):
-        try:
-            descriptor = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        except FileExistsError:
-            if not _clear_stale(lock):
-                return False
-            continue
+        while not _try_lock(descriptor, blocking=deadline is None):
+            if time.monotonic() >= deadline:  # type: ignore[operator]
+                raise _DeadlinePassed()
+            time.sleep(POLL_SECONDS)
+        yield
+    finally:
+        # Closing the descriptor releases the lock.
         os.close(descriptor)
+
+
+def _try_lock(descriptor: int, *, blocking: bool) -> bool:
+    if fcntl is not None:
+        flags = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
+        try:
+            fcntl.flock(descriptor, flags)
+        except (BlockingIOError, InterruptedError):
+            return False
         return True
-    return False
+    while True:  # pragma: no cover - Windows
+        try:
+            msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError:
+            if not blocking:
+                return False
+            time.sleep(POLL_SECONDS)
 
 
-def _clear_stale(lock: Path) -> bool:
-    """Remove a lock left by a process that stopped. Return True if removed."""
-
-    try:
-        age = time.time() - lock.stat().st_mtime
-    except FileNotFoundError:
-        return True
-    if age < LOCK_STALE_SECONDS:
-        return False
-    lock.unlink(missing_ok=True)
-    return True
+def _check(deadline: float | None) -> None:
+    if deadline is not None and time.monotonic() >= deadline:
+        raise _DeadlinePassed()
 
 
-def _wait(database: Path, lock: Path) -> None:
-    """Give the process holding the lock a moment to finish its copy."""
+def _copy_database(source: Path, destination: Path, deadline: float | None) -> bool:
+    """Copy through the backup API, which includes changes still in the log.
 
-    deadline = time.monotonic() + WAIT_SECONDS
-    while time.monotonic() < deadline:
-        if database.exists() or not lock.exists():
-            return
-        time.sleep(POLL_SECONDS)
+    The backup runs in steps so a deadline can stop it between them, including
+    while the source is locked by a writer.
+    """
 
-
-def _copy_database(source: Path, destination: Path) -> bool:
-    """Copy through the backup API, which includes changes still in the log."""
-
-    staged = destination.with_name(f".{destination.name}.{os.getpid()}.tmp")
-    _remove_database_files(staged)
+    _check(deadline)
+    staged = destination.with_name(f".{destination.name}{STAGING_SUFFIX}")
     create_private_file(staged)
-    try:
-        with (
-            closing(sqlite3.connect(source, timeout=1.5)) as reader,
-            closing(sqlite3.connect(staged)) as writer,
-        ):
-            reader.backup(writer)
-        return _link_new(staged, destination)
-    finally:
-        _remove_database_files(staged)
+
+    def progress(status: int, remaining: int, total: int) -> None:
+        _check(deadline)
+
+    wait = 1.5 if deadline is None else max(0.0, deadline - time.monotonic())
+    with (
+        closing(sqlite3.connect(source, timeout=wait)) as reader,
+        closing(sqlite3.connect(staged)) as writer,
+    ):
+        reader.backup(writer, pages=BACKUP_PAGES, progress=progress, sleep=POLL_SECONDS)
+    _check(deadline)
+    return _link_new(staged, destination)
 
 
-def _copy_state_files(source: Path, target: Path) -> None:
+def _copy_state_files(source: Path, target: Path, deadline: float | None) -> None:
     for path in sorted(source.rglob("*")):
+        _check(deadline)
         relative = path.relative_to(source)
         if (
             path.is_symlink()
@@ -275,31 +300,39 @@ def _copy_state_files(source: Path, target: Path) -> None:
         if destination.exists():
             continue
         make_private_dir(destination.parent)
-        descriptor, staged = tempfile.mkstemp(
-            dir=destination.parent, prefix=f".{destination.name}.", suffix=".tmp"
-        )
-        try:
-            with os.fdopen(descriptor, "wb") as stream:
-                stream.write(path.read_bytes())
-            _link_new(Path(staged), destination)
-        finally:
-            Path(staged).unlink(missing_ok=True)
+        staged = destination.with_name(f".{destination.name}{STAGING_SUFFIX}")
+        descriptor = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(path.read_bytes())
+        _link_new(staged, destination)
 
 
 def _link_new(staged: Path, destination: Path) -> bool:
-    """Put ``staged`` at ``destination`` unless a file is already there."""
+    """Put ``staged`` at ``destination`` unless a file is already there.
+
+    A hard link fails when the name exists, so it never replaces anything. On
+    a file system without hard links the name is checked and then renamed.
+    That is safe because it runs under the copy lock, and every writer of a
+    pending folder takes that lock first.
+    """
 
     try:
         os.link(staged, destination)
     except FileExistsError:
         return False
     except OSError:
-        # A file system without hard links. The lock makes this the only
-        # writer, so check and rename.
         if destination.exists():
             return False
-        os.replace(staged, destination)
+        os.rename(staged, destination)
     return True
+
+
+def _remove_staging(target: Path) -> None:
+    """Remove temporary files left by a copier that stopped. Hold the lock."""
+
+    for path in target.rglob(f".*{STAGING_SUFFIX}*"):
+        if path.is_file() or path.is_symlink():
+            path.unlink(missing_ok=True)
 
 
 def _write_record(target: Path, source: Path) -> None:
@@ -318,6 +351,72 @@ def _write_record(target: Path, source: Path) -> None:
         Path(staged).unlink(missing_ok=True)
 
 
-def _remove_database_files(path: Path) -> None:
-    for suffix in ("", "-wal", "-shm", "-journal"):
-        Path(f"{path}{suffix}").unlink(missing_ok=True)
+def copied_from(target: Path) -> Path | None:
+    """Return the folder the record says a store was copied from."""
+
+    try:
+        record = json.loads((target / COPY_RECORD).read_text(encoding="utf-8"))
+        return Path(str(record["source"]))
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def unused_host_stores(
+    target: Path,
+    environ: Mapping[str, str],
+    *,
+    copy_error: str | None = None,
+) -> list[dict[str, Any]]:
+    """Describe each host store that exists but is no longer read.
+
+    The description comes from the stores themselves: a host store counts as
+    copied when every session it holds is also in the data folder.
+    """
+
+    target = target.expanduser().resolve()
+    database = target / DATABASE_NAME
+    recorded = copied_from(target)
+    unused: list[dict[str, Any]] = []
+    for folder in candidate_sources(target, environ):
+        if not database.exists():
+            reason = f": {copy_error}" if copy_error else ""
+            unused.append(
+                {
+                    "path": str(folder),
+                    "copied": False,
+                    "status": f"not copied yet into {target}{reason}",
+                }
+            )
+            continue
+        try:
+            total, missing = _missing_sessions(folder / DATABASE_NAME, database)
+        except sqlite3.Error as exc:
+            unused.append(
+                {
+                    "path": str(folder),
+                    "copied": False,
+                    "status": f"could not be compared with {target}: {exc}",
+                }
+            )
+            continue
+        if missing == 0:
+            when = " as recorded" if recorded == folder else ""
+            status = f"copied into {target}{when}; nothing reads this folder now"
+        else:
+            status = (
+                f"not copied, because {target} already had its own data; it "
+                f"lacks {missing} of the {total} sessions here, and nothing "
+                "reads this folder now"
+            )
+        unused.append({"path": str(folder), "copied": missing == 0, "status": status})
+    return unused
+
+
+def _missing_sessions(source: Path, target: Path) -> tuple[int, int]:
+    """Count the source's sessions and those the target does not hold."""
+
+    with closing(sqlite3.connect(f"file:{source}?mode=ro", uri=True, timeout=1.0)) as old:
+        sessions = {row[0] for row in old.execute("SELECT session_id FROM sessions")}
+    with closing(sqlite3.connect(f"file:{target}?mode=ro", uri=True, timeout=1.0)) as new:
+        present = {row[0] for row in new.execute("SELECT session_id FROM sessions")}
+    return len(sessions), len(sessions - present)

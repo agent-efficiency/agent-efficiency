@@ -26,7 +26,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from agent_efficiency import __version__
-from agent_efficiency.host_data import settle_data_dir
+from agent_efficiency.host_data import CopyPending, settle_data_dir
 from agent_efficiency.vault import gitcontent
 from agent_efficiency.vault.config import (
     VaultConfigError,
@@ -601,7 +601,10 @@ def _permissions(bits: int) -> int:
 
 
 def _register(args: argparse.Namespace) -> int:
-    root = settle_data_dir(args.data_dir, discover=True)
+    try:
+        root = settle_data_dir(args.data_dir)
+    except CopyPending as exc:
+        return _fail(str(exc))
     try:
         stale = stale_entries(root)
         tree = register_tree(root, Path(args.root))
@@ -615,7 +618,10 @@ def _register(args: argparse.Namespace) -> int:
 
 def _show(args: argparse.Namespace) -> int:
     cwd = Path(args.cwd or os.getcwd())
-    root = settle_data_dir(args.data_dir, discover=True)
+    try:
+        root = settle_data_dir(args.data_dir)
+    except CopyPending as exc:
+        return _fail(str(exc))
     prepared = prepare(cwd, root)
     if prepared.status != "ready":
         print(f"No vault context: {prepared.status} ({prepared.reason}).")

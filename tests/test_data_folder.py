@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import io
 import json
 import os
@@ -10,6 +11,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from concurrent.futures import ProcessPoolExecutor
@@ -69,6 +71,44 @@ def run_cli(environment: dict[str, str], *arguments: str) -> subprocess.Complete
         timeout=60,
         check=False,
     )
+
+
+def leftovers(target: Path) -> list[str]:
+    """Temporary files a copy left behind. The lock file stays by design."""
+
+    return sorted(
+        str(path.relative_to(target))
+        for path in target.rglob("*")
+        if ".tmp" in path.name
+    )
+
+
+def lock_copy(target: Path):
+    """Hold the copy lock the way a copier does, from this process."""
+
+    target.mkdir(parents=True, exist_ok=True)
+    handle = open(target / host_data.LOCK_NAME, "a+b")
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+    return handle
+
+
+def lock_database(path: Path) -> sqlite3.Connection:
+    """Hold an exclusive lock on a database so no reader can start."""
+
+    holder = sqlite3.connect(path, timeout=5, check_same_thread=False)
+    holder.execute("PRAGMA locking_mode = EXCLUSIVE")
+    holder.execute("BEGIN EXCLUSIVE")
+    holder.execute("UPDATE settings SET value = value WHERE key = 'default_mode'")
+    return holder
+
+
+def hook_payload(home: Path, session_id: str) -> dict:
+    return {
+        "hook_event_name": "SessionStart",
+        "session_id": session_id,
+        "cwd": str(home),
+        "source": "startup",
+    }
 
 
 def _adopt(target: str, source: str) -> str | None:
@@ -165,12 +205,7 @@ class HostStoreCopyTests(unittest.TestCase):
             self.assertEqual(run_hook(environment, payload).returncode, 0)
             self.assertIsNone(store.get_session("later-in-old-store"))
             self.assertIsNotNone(store.get_session("second-session"))
-            leftovers = [
-                path.name
-                for path in target.iterdir()
-                if path.name.endswith(".tmp") or path.name.endswith(".lock")
-            ]
-            self.assertEqual(leftovers, [])
+            self.assertEqual(leftovers(target), [])
 
     def test_copy_includes_changes_still_in_the_write_ahead_log(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -237,42 +272,7 @@ class HostStoreCopyTests(unittest.TestCase):
                 [result for result in results if result], [str(source.resolve())]
             )
             self.assertIsNotNone(Store(target).get_session("raced"))
-            leftovers = [
-                path.name
-                for path in target.iterdir()
-                if path.name.endswith(".tmp") or path.name.endswith(".lock")
-            ]
-            self.assertEqual(leftovers, [])
-
-    def test_a_held_lock_blocks_the_copy(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            source = Path(temp) / "plugin"
-            host_store(source, "locked")
-            target = Path(temp) / "data"
-            target.mkdir()
-            (target / host_data.LOCK_NAME).write_text("", encoding="utf-8")
-            with mock.patch.object(host_data, "WAIT_SECONDS", 0.05):
-                copied = host_data.adopt_host_store(
-                    target, {"CLAUDE_PLUGIN_DATA": str(source)}
-                )
-            self.assertIsNone(copied)
-            self.assertFalse((target / "agent-efficiency.db").exists())
-
-    def test_a_stale_lock_is_cleared(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            source = Path(temp) / "plugin"
-            host_store(source, "stale-lock")
-            target = Path(temp) / "data"
-            target.mkdir()
-            lock = target / host_data.LOCK_NAME
-            lock.write_text("", encoding="utf-8")
-            old = time.time() - host_data.LOCK_STALE_SECONDS - 5
-            os.utime(lock, (old, old))
-            copied = host_data.adopt_host_store(
-                target, {"CLAUDE_PLUGIN_DATA": str(source)}
-            )
-            self.assertEqual(copied, source.resolve())
-            self.assertFalse(lock.exists())
+            self.assertEqual(leftovers(target), [])
 
     def test_terminal_copies_a_host_store_into_the_default_folder(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -331,14 +331,209 @@ class HostStoreCopyTests(unittest.TestCase):
                 "CLAUDE_PLUGIN_DATA": str(source),
                 "AGENT_EFFICIENCY_DATA": str(chosen),
             }
-            for discover in (False, True):
-                with self.subTest(discover=discover):
-                    host_data.settle_data_dir(None, environ, discover=discover)
-                    self.assertFalse((chosen / "agent-efficiency.db").exists())
+            host_data.settle_data_dir(None, environ)
+            self.assertFalse((chosen / "agent-efficiency.db").exists())
             host_data.settle_data_dir(
                 chosen, {"HOME": str(home), "PLUGIN_DATA": str(source)}
             )
             self.assertFalse((chosen / "agent-efficiency.db").exists())
+
+
+class CopyProtocolTests(unittest.TestCase):
+    """A pending copy is finished or retried, and never replaced by a new store."""
+
+    def setUp(self) -> None:
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.home = Path(temp.name)
+        self.source = self.home / CLAUDE_DATA
+        host_store(self.source, "old-history")
+        self.target = default_folder(self.home)
+        self.environment = isolated_environment(self.home)
+        self.environment["CLAUDE_PLUGIN_DATA"] = str(self.source)
+
+    def hook(self, session_id: str) -> subprocess.CompletedProcess:
+        return run_hook(self.environment, hook_payload(self.home, session_id))
+
+    def assert_history(self, *sessions: str) -> None:
+        store = Store(self.target)
+        for session in ("old-history", *sessions):
+            self.assertIsNotNone(store.get_session(session), session)
+
+    def test_a_hook_waiting_on_a_copy_creates_no_store(self) -> None:
+        handle = lock_copy(self.target)
+        try:
+            started = time.monotonic()
+            completed = self.hook("while-copying")
+            elapsed = time.monotonic() - started
+        finally:
+            handle.close()
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stdout, "")
+        self.assertLess(elapsed, 2.0)
+        self.assertFalse((self.target / "agent-efficiency.db").exists())
+        self.assertEqual(self.hook("after-copy").returncode, 0)
+        self.assert_history("after-copy")
+
+    def test_a_killed_copier_is_finished_by_the_next_run(self) -> None:
+        script = (
+            "import sys, time\n"
+            "from pathlib import Path\n"
+            "from agent_efficiency import host_data\n"
+            "target = Path(sys.argv[1])\n"
+            "with host_data.copy_lock(target, None):\n"
+            "    (target / '.agent-efficiency.db.copy.tmp').write_bytes(b'partial')\n"
+            "    (target / '.vault.json.copy.tmp').write_bytes(b'partial')\n"
+            "    print('copying', flush=True)\n"
+            "    time.sleep(60)\n"
+        )
+        self.target.mkdir(parents=True)
+        copier = subprocess.Popen(
+            [sys.executable, "-c", script, str(self.target)],
+            env={**self.environment, "PYTHONPATH": str(PLUGIN_ROOT / "src")},
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            self.assertEqual(copier.stdout.readline().strip(), "copying")
+            self.assertEqual(self.hook("during").returncode, 0)
+            self.assertFalse((self.target / "agent-efficiency.db").exists())
+        finally:
+            copier.kill()
+            copier.wait()
+            copier.stdout.close()
+        self.assertEqual(self.hook("after-kill").returncode, 0)
+        self.assert_history("after-kill")
+        self.assertEqual(leftovers(self.target), [])
+
+    def test_a_locked_source_ends_the_hook_inside_its_budget(self) -> None:
+        holder = lock_database(self.source / "agent-efficiency.db")
+        try:
+            started = time.monotonic()
+            completed = self.hook("while-locked")
+            elapsed = time.monotonic() - started
+        finally:
+            holder.rollback()
+            holder.close()
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertLess(elapsed, 2.0)
+        self.assertFalse((self.target / "agent-efficiency.db").exists())
+        self.assertEqual(leftovers(self.target), [])
+        self.assertEqual(self.hook("unlocked").returncode, 0)
+        self.assert_history("unlocked")
+
+    def test_repeated_failures_stay_retryable(self) -> None:
+        failing = mock.patch.object(
+            host_data,
+            "_copy_database",
+            side_effect=sqlite3.DatabaseError("disk I/O error"),
+        )
+        with failing:
+            for _ in range(3):
+                with self.assertRaises(host_data.CopyPending) as raised:
+                    host_data.settle_data_dir(
+                        environ=self.environment, deadline=time.monotonic() + 5
+                    )
+                self.assertIn("disk I/O error", str(raised.exception))
+                self.assertFalse((self.target / "agent-efficiency.db").exists())
+        host_data.settle_data_dir(environ=self.environment)
+        self.assert_history()
+
+    def test_publishing_never_replaces_a_store_that_appeared(self) -> None:
+        real_link = os.link
+
+        def appear_then_link(source: str, destination: str) -> None:
+            if str(destination).endswith("agent-efficiency.db"):
+                Path(destination).write_bytes(b"someone else")
+            real_link(source, destination)
+
+        with mock.patch.object(host_data.os, "link", side_effect=appear_then_link):
+            copied = host_data.adopt_host_store(
+                self.target, {"CLAUDE_PLUGIN_DATA": str(self.source)}
+            )
+        self.assertIsNone(copied)
+        self.assertEqual(
+            (self.target / "agent-efficiency.db").read_bytes(), b"someone else"
+        )
+        self.assertEqual(leftovers(self.target), [])
+
+    def test_without_hard_links_publishing_still_refuses_to_replace(self) -> None:
+        def appear_then_fail(source: str, destination: str) -> None:
+            if str(destination).endswith("agent-efficiency.db"):
+                Path(destination).write_bytes(b"someone else")
+            raise PermissionError("hard links are not supported here")
+
+        with mock.patch.object(host_data.os, "link", side_effect=appear_then_fail):
+            host_data.adopt_host_store(
+                self.target, {"CLAUDE_PLUGIN_DATA": str(self.source)}
+            )
+        self.assertEqual(
+            (self.target / "agent-efficiency.db").read_bytes(), b"someone else"
+        )
+
+    def test_without_hard_links_a_copy_still_lands(self) -> None:
+        with mock.patch.object(
+            host_data.os, "link", side_effect=PermissionError("no hard links")
+        ):
+            copied = host_data.adopt_host_store(
+                self.target, {"CLAUDE_PLUGIN_DATA": str(self.source)}
+            )
+        self.assertEqual(copied, self.source.resolve())
+        self.assert_history()
+
+    def test_a_failed_record_does_not_hide_the_copy(self) -> None:
+        with mock.patch.object(
+            host_data, "_write_record", side_effect=OSError("disk full")
+        ):
+            host_data.settle_data_dir(environ=self.environment)
+        self.assert_history()
+        self.assertFalse((self.target / host_data.COPY_RECORD).exists())
+        (unused,) = host_data.unused_host_stores(self.target, self.environment)
+        self.assertTrue(unused["copied"])
+        self.assertIn("copied into", unused["status"])
+
+    def test_the_terminal_finishes_a_copy_without_a_deadline(self) -> None:
+        holder = lock_database(self.source / "agent-efficiency.db")
+        release = threading.Timer(2.5, lambda: (holder.rollback(), holder.close()))
+        release.start()
+        try:
+            status = run_cli(self.environment, "status", "--json")
+        finally:
+            release.join()
+        self.assertEqual(status.returncode, 0, status.stderr)
+        self.assert_history()
+
+    def test_the_terminal_stops_when_the_copy_fails(self) -> None:
+        (self.source / "agent-efficiency.db").write_bytes(b"not a database" * 100)
+        for sidecar in ("-wal", "-shm"):
+            Path(f"{self.source / 'agent-efficiency.db'}{sidecar}").unlink(
+                missing_ok=True
+            )
+        status = run_cli(self.environment, "status")
+        self.assertEqual(status.returncode, 2)
+        self.assertIn("could not finish copying", status.stderr)
+        self.assertIn(str(self.source.resolve()), status.stderr)
+        self.assertFalse((self.target / "agent-efficiency.db").exists())
+        doctor = run_cli(self.environment, "doctor", "--json")
+        self.assertEqual(doctor.returncode, 1)
+        result = json.loads(doctor.stdout)
+        self.assertFalse(result["ok"])
+        self.assertIn("could not finish copying", result["data_copy"])
+        (unused,) = result["unused_data_dirs"]
+        self.assertFalse(unused["copied"])
+        self.assertIn("not copied yet", unused["status"])
+        self.assertFalse((self.target / "agent-efficiency.db").exists())
+        text = run_cli(self.environment, "doctor")
+        self.assertEqual(text.returncode, 1)
+        self.assertIn("data_copy: Agent Efficiency could not finish", text.stdout)
+
+    def test_a_codex_hook_waits_for_the_claude_store_too(self) -> None:
+        environment = isolated_environment(self.home)
+        environment["PLUGIN_DATA"] = str(self.home / CODEX_DATA)
+        (self.home / CODEX_DATA).mkdir(parents=True)
+        completed = run_hook(environment, hook_payload(self.home, "codex-first"))
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assert_history("codex-first")
 
 
 class UnusedStoreReportTests(unittest.TestCase):
