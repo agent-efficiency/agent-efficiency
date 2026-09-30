@@ -294,6 +294,52 @@ class HostStoreCopyTests(unittest.TestCase):
             self.assertIsNone(json.loads(status.stdout)["session"])
             self.assertFalse((chosen / host_data.COPY_RECORD).exists())
 
+    def test_hooks_leave_an_explicit_folder_alone(self) -> None:
+        for variable in ("CLAUDE_PLUGIN_DATA", "PLUGIN_DATA"):
+            with self.subTest(variable=variable), tempfile.TemporaryDirectory() as temp:
+                home = Path(temp)
+                source = home / CLAUDE_DATA
+                host_store(source, "old-history")
+                chosen = home / "chosen"
+                environment = isolated_environment(home)
+                environment[variable] = str(source)
+                environment["AGENT_EFFICIENCY_DATA"] = str(chosen)
+                completed = run_hook(
+                    environment,
+                    {
+                        "hook_event_name": "SessionStart",
+                        "session_id": "new-session",
+                        "cwd": str(home),
+                        "source": "startup",
+                    },
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                store = Store(chosen)
+                self.assertIsNotNone(store.get_session("new-session"))
+                self.assertIsNone(store.get_session("old-history"))
+                self.assertFalse((chosen / "vault.json").exists())
+                self.assertFalse((chosen / host_data.COPY_RECORD).exists())
+
+    def test_an_explicit_folder_never_receives_a_copy(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp)
+            source = home / CLAUDE_DATA
+            host_store(source, "old-history")
+            chosen = home / "chosen"
+            environ = {
+                "HOME": str(home),
+                "CLAUDE_PLUGIN_DATA": str(source),
+                "AGENT_EFFICIENCY_DATA": str(chosen),
+            }
+            for discover in (False, True):
+                with self.subTest(discover=discover):
+                    host_data.settle_data_dir(None, environ, discover=discover)
+                    self.assertFalse((chosen / "agent-efficiency.db").exists())
+            host_data.settle_data_dir(
+                chosen, {"HOME": str(home), "PLUGIN_DATA": str(source)}
+            )
+            self.assertFalse((chosen / "agent-efficiency.db").exists())
+
 
 class UnusedStoreReportTests(unittest.TestCase):
     def _doctor(self, home: Path) -> dict:

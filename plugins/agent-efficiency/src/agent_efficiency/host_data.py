@@ -61,17 +61,17 @@ def settle_data_dir(
 
     A hook passes ``discover=False`` and copies only from the folder its host
     variables name. The terminal command passes ``discover=True`` so it also
-    finds a store in the host plugin data folders, and it copies only into the
-    default folder, never into one chosen with --data-dir or
+    finds a store in the host plugin data folders. Either way the copy goes
+    only into the default folder, never into one chosen with --data-dir or
     AGENT_EFFICIENCY_DATA. A failed copy never stops the caller.
     """
 
     env = os.environ if environ is None else environ
     target = data_dir(explicit, env)
+    if data_dir_is_chosen(explicit, env):
+        return target
     candidates = host_data_dirs(env)
     if discover:
-        if data_dir_is_chosen(explicit, env):
-            return target
         for folder in installed_host_data_dirs(env):
             if folder not in candidates:
                 candidates.append(folder)
