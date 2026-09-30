@@ -671,6 +671,72 @@ class FolderEnablementTests(unittest.TestCase):
         )
         self.assertIn("administrator", " ".join(folder["fixes"]))
 
+    def test_a_broken_install_for_another_folder_is_only_a_warning(self) -> None:
+        claude_install(
+            self.home,
+            [
+                claude_record(self.cache),
+                claude_record(
+                    self.home / "cache" / "missing",
+                    scope="project",
+                    projectPath=str(self.home / "work" / "other"),
+                ),
+            ],
+        )
+        code, doctor = run_doctor(self.home, self.project)
+        self.assertEqual(code, 0)
+        self.assertTrue(doctor["ok"])
+        claude = doctor["installed_hosts"]["claude"]
+        self.assertTrue(claude["ready"])
+        (warning,) = claude["warnings"]
+        self.assertIn("does not exist", warning)
+        with (
+            isolated_home(self.home),
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
+            main(
+                [
+                    "--data-dir",
+                    str(self.home / "data"),
+                    "doctor",
+                    "--cwd",
+                    str(self.project),
+                ]
+            )
+        self.assertIn("warning:", output.getvalue())
+
+    def test_a_broken_user_install_fails_in_every_folder(self) -> None:
+        project_copy = plugin_copy(self.home / "cache" / "project")
+        claude_install(
+            self.home,
+            [
+                claude_record(self.home / "cache" / "missing"),
+                claude_record(
+                    project_copy, scope="project", projectPath=str(self.project)
+                ),
+            ],
+        )
+        code, doctor = run_doctor(self.home, self.project)
+        self.assertEqual(code, 1)
+        self.assertFalse(doctor["installed_hosts"]["claude"]["ready"])
+
+    def test_a_stale_hook_file_in_the_install_used_here_fails(self) -> None:
+        project_copy = plugin_copy(
+            self.home / "cache" / "project", stale_default_hooks=True
+        )
+        claude_install(
+            self.home,
+            [
+                claude_record(self.cache),
+                claude_record(
+                    project_copy, scope="project", projectPath=str(self.project)
+                ),
+            ],
+        )
+        code, doctor = run_doctor(self.home, self.project)
+        self.assertEqual(code, 1)
+        self.assertEqual(doctor["installed_hosts"]["claude"]["warnings"], [])
+
     def test_settings_that_cannot_be_read_here_are_named(self) -> None:
         claude_install(self.home, [claude_record(self.cache)])
         code, doctor = run_doctor(self.home, self.project)

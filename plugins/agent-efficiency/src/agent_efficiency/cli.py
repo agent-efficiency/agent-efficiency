@@ -1013,9 +1013,26 @@ def _installed_host_status(folder: Path) -> dict[str, dict[str, Any]]:
             home=home,
         )
         claude["this_folder"] = here
-        if not here["ready"]:
-            claude["ready"] = False
-            claude["status"] = "not ready"
+        # Only the install used here and the user install, which every
+        # folder falls back to, decide readiness. A broken install made for
+        # another folder is shown as a warning.
+        warnings: list[str] = []
+        ready = bool(here["ready"])
+        for index, install in enumerate(claude["installs"]):
+            install["applies_here"] = index == here["install_index"]
+            if install["ready"]:
+                continue
+            if install["applies_here"] or install["scope"] == "user":
+                ready = False
+            else:
+                where = install.get("project") or install["path"]
+                warnings.extend(
+                    f"{install['scope']} install for {where}: {reason}"
+                    for reason in install["not_ready_reasons"]
+                )
+        claude["ready"] = ready
+        claude["status"] = "ready" if ready else "not ready"
+        claude["warnings"] = warnings
     return {
         "claude": claude,
         "codex": _codex_installs(Path(os.environ.get("CODEX_HOME") or home / ".codex")),
@@ -1414,7 +1431,15 @@ def _format_installed(installed: dict[str, Any]) -> list[str]:
                 f"{name}: {state}, {install['version']} "
                 f"({install['scope']} scope) at {install['path']}"
             )
-            lines.extend(f"  fix: {reason}" for reason in install["not_ready_reasons"])
+            label = (
+                "warning"
+                if install.get("applies_here") is False
+                and install["scope"] != "user"
+                else "fix"
+            )
+            lines.extend(
+                f"  {label}: {reason}" for reason in install["not_ready_reasons"]
+            )
         here = summary.get("this_folder")
         if here:
             lines.extend(_format_folder(name, here))

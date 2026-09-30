@@ -88,6 +88,11 @@ def folder_status(
         "plugin": plugin,
         "scope": record["scope"] if record else None,
         "install_path": record["path"] if record else None,
+        "install_index": (
+            next(index for index, item in enumerate(installs) if item is record)
+            if record is not None
+            else None
+        ),
         "decided_by": str(decided_by) if decided_by else None,
         "trusted": is_trusted(folder, repository, trust_file),
         "trust_file": str(trust_file),
