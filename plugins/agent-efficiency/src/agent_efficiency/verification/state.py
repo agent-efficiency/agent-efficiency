@@ -21,11 +21,15 @@ def is_cache_path(root: Path, relative: bytes) -> bool:
 
     Only content beneath a folder with a cache name counts, and every such
     folder on the way must be a real directory. A file or a symlink that only
-    carries a cache name is an ordinary workspace change, and a symlink still
-    gets the check that it stays inside the workspace.
+    carries a cache name is an ordinary workspace change. A symlink is never
+    skipped, at any depth, so it always gets the check that it stays inside
+    the workspace.
     """
 
     parts = relative.split(b"/")
+    path = root.joinpath(*(item.decode("utf-8", "surrogateescape") for item in parts))
+    if path.is_symlink():
+        return False
     found = False
     for depth, part in enumerate(parts[:-1], start=1):
         if part not in CACHE_FOLDERS:

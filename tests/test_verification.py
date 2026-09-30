@@ -325,6 +325,27 @@ class VerificationResultTests(unittest.TestCase):
                 self.assertIn("check unit: inconclusive", output)
                 (self.root / name).unlink()
 
+    def test_a_symlink_inside_a_real_cache_folder_is_checked(self) -> None:
+        outside = Path(self.temp.name) / "outside"
+        outside.mkdir()
+        for name in ("__pycache__/escape", "tests/__pycache__/deep/escape"):
+            with self.subTest(name=name):
+                self.write_config(
+                    [
+                        sys.executable,
+                        "-c",
+                        "import os, sys; "
+                        "os.makedirs(os.path.dirname(sys.argv[2]), exist_ok=True); "
+                        "os.symlink(sys.argv[1], sys.argv[2])",
+                        str(outside),
+                        name,
+                    ]
+                )
+                code, output = self.cli("check", "unit")
+                self.assertEqual(code, 1, output)
+                self.assertIn("check unit: inconclusive", output)
+                (self.root / name).unlink()
+
     def test_a_file_named_like_a_cache_folder_is_a_change(self) -> None:
         self.write_config(
             [
