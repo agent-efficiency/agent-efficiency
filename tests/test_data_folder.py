@@ -664,10 +664,48 @@ class UnusedStoreReportTests(unittest.TestCase):
                 str((home / CODEX_DATA).resolve()),
             },
         )
+        target = default_folder(home)
         for item in unused.values():
             self.assertFalse(item["copied"])
             self.assertIn("not copied", item["status"])
+            steps = item["recovery"]
+            self.assertIn("quit", steps)
+            self.assertIn(str(target / "agent-efficiency.db"), steps)
+            self.assertIn("agent-efficiency doctor", steps)
+            self.assertIn("keep", steps)
         self.assertTrue(doctor["ok"])
+
+    def test_the_recovery_steps_bring_the_old_store_over(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp)
+            target = default_folder(home)
+            Store(target).ensure_session("own", host="claude", cwd="/work/app")
+            host_store(home / CLAUDE_DATA, "left-behind")
+            aside = home / "aside"
+            aside.mkdir()
+            for suffix in ("", "-wal", "-shm"):
+                moved = Path(f"{target / 'agent-efficiency.db'}{suffix}")
+                if moved.exists():
+                    moved.rename(aside / moved.name)
+            doctor = self._doctor(home)
+            self.assertTrue(doctor["ok"])
+            self.assertTrue(doctor["unused_data_dirs"][0]["copied"])
+            self.assertIsNotNone(Store(target).get_session("left-behind"))
+            self.assertIsNotNone(Store(aside).get_session("own"))
+
+    def test_doctor_text_gives_the_recovery_steps(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp)
+            Store(default_folder(home)).ensure_session(
+                "own", host="claude", cwd="/work/app"
+            )
+            host_store(home / CLAUDE_DATA, "left-behind")
+            with (
+                isolated_home(home),
+                contextlib.redirect_stdout(io.StringIO()) as output,
+            ):
+                main(["doctor"])
+        self.assertIn("    to copy it:", output.getvalue())
 
     def test_doctor_reports_a_store_it_copied(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

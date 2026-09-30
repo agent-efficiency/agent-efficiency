@@ -1454,7 +1454,10 @@ def _format_doctor(result: dict[str, Any]) -> str:
                 lines.append(f"{key}: none")
             else:
                 lines.append(f"{key}:")
-                lines.extend(f"  {item['path']}: {item['status']}" for item in value)
+                for item in value:
+                    lines.append(f"  {item['path']}: {item['status']}")
+                    if item.get("recovery"):
+                        lines.append(f"    to copy it: {item['recovery']}")
         else:
             lines.append(f"{key}: {value}")
     return "\n".join(lines)

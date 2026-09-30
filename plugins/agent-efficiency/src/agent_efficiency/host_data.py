@@ -453,8 +453,28 @@ def unused_host_stores(
                 f"lacks {missing} of the {total} sessions here, and nothing "
                 "reads this folder now"
             )
-        unused.append({"path": str(folder), "copied": missing == 0, "status": status})
+        entry = {"path": str(folder), "copied": missing == 0, "status": status}
+        if missing:
+            entry["recovery"] = _recovery_steps(folder, target)
+        unused.append(entry)
     return unused
+
+
+def _recovery_steps(folder: Path, target: Path) -> str:
+    """Plain steps that copy an old store in while keeping both histories.
+
+    The two stores are not merged. The current database is moved aside, where
+    it stays, so either history can be kept.
+    """
+
+    database = target / DATABASE_NAME
+    return (
+        "quit every agent session; move "
+        + ", ".join(f"{database}{suffix}" for suffix in ("", *DATABASE_SIDECARS[:2]))
+        + f" into a folder of your choosing; run agent-efficiency doctor, which "
+        f"copies the store from {folder}; then keep the moved files if you want "
+        "the sessions they hold, or delete them"
+    )
 
 
 def _missing_sessions(source: Path, target: Path) -> tuple[int, int]:
