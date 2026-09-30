@@ -27,6 +27,7 @@ from agent_efficiency.capability_retrieval import (
     explain_capability,
 )
 from agent_efficiency.hook import format_session_status
+from agent_efficiency.claude_folder import claude_paths, folder_status
 from agent_efficiency.host_data import settle_data_dir, unused_host_stores
 from agent_efficiency.models import VALID_MODES
 from agent_efficiency.paths import (
@@ -155,6 +156,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = subparsers.add_parser("doctor", help="Check local installation.")
     doctor.add_argument("--json", action="store_true")
+    doctor.add_argument(
+        "--cwd",
+        help="Folder to check host enablement for. Defaults to the current folder.",
+    )
 
     smoke = subparsers.add_parser(
         "smoke-test",
@@ -350,7 +355,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _emit(explanation if args.json else format_explanation(explanation), args.json)
         return 0
     if args.command == "doctor":
-        result = _doctor(store)
+        result = _doctor(store, Path(args.cwd) if args.cwd else Path.cwd())
         _emit(result if args.json else _format_doctor(result), args.json)
         return 0 if result["ok"] else 1
     if args.command == "migrate":
@@ -978,14 +983,27 @@ def _host_package_status() -> dict[str, dict[str, Any]]:
     return result
 
 
-def _installed_host_status() -> dict[str, dict[str, Any]]:
+def _installed_host_status(folder: Path) -> dict[str, dict[str, Any]]:
     """Check the plugin each host actually installed, not this package."""
 
     home = Path.home()
+    claude = _claude_installs(
+        Path(os.environ.get("CLAUDE_CONFIG_DIR") or home / ".claude")
+    )
+    if claude["installs"]:
+        user_settings, trust_file = claude_paths(os.environ, home)
+        here = folder_status(
+            folder,
+            claude["installs"],
+            user_settings=user_settings,
+            trust_file=trust_file,
+        )
+        claude["this_folder"] = here
+        if not here["ready"]:
+            claude["ready"] = False
+            claude["status"] = "not ready"
     return {
-        "claude": _claude_installs(
-            Path(os.environ.get("CLAUDE_CONFIG_DIR") or home / ".claude")
-        ),
+        "claude": claude,
         "codex": _codex_installs(Path(os.environ.get("CODEX_HOME") or home / ".codex")),
         "cursor": _cursor_installs(home / ".cursor"),
     }
@@ -1133,7 +1151,7 @@ def _host_summary(
     }
 
 
-def _doctor(store: Store) -> dict[str, Any]:
+def _doctor(store: Store, folder: Path | None = None) -> dict[str, Any]:
     try:
         capability_pack = load_bundled_capability_pack()
         capability_pack_policies(capability_pack)
@@ -1152,7 +1170,7 @@ def _doctor(store: Store) -> dict[str, Any]:
         embedded_capability_pack_digest = None
 
     hosts = _host_package_status()
-    installed = _installed_host_status()
+    installed = _installed_host_status(folder or Path.cwd())
     minimum_python = ".".join(str(part) for part in MINIMUM_PYTHON)
     hook_path, hook_version = _hook_python()
     hook_python_supported = hook_version is None or (
@@ -1369,7 +1387,28 @@ def _format_installed(installed: dict[str, Any]) -> list[str]:
                 f"({install['scope']} scope) at {install['path']}"
             )
             lines.extend(f"  fix: {reason}" for reason in install["not_ready_reasons"])
+        here = summary.get("this_folder")
+        if here:
+            lines.extend(_format_folder(name, here))
     return lines
+
+
+def _format_folder(name: str, here: dict[str, Any]) -> list[str]:
+    trust = (
+        "workspace trust is saved"
+        if here["trusted"]
+        else "workspace trust is not saved, so Claude Code ignores this folder's "
+        "permission rules, but not its plugin settings"
+    )
+    if here["ready"]:
+        return [
+            f"{name} in {here['folder']}: enabled by {here['decided_by']}, "
+            f"{here['scope']} scope install; {trust}"
+        ]
+    return [
+        f"{name} in {here['folder']}: {here['status']}: {here['reason']}",
+        *(f"  fix: {fix}" for fix in here["fixes"]),
+    ]
 
 
 def _format_key_values(value: dict[str, Any]) -> str:

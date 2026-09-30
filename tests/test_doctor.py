@@ -112,14 +112,38 @@ def plugin_copy(target: Path, *, stale_default_hooks: bool = False) -> Path:
     return target
 
 
-def claude_install(home: Path, records: list[dict]) -> None:
+PLUGIN_ID = "agent-efficiency@agent-efficiency"
+
+
+def claude_install(
+    home: Path, records: list[dict], *, user_enabled: bool | None = True
+) -> None:
+    """Write the install records, and the user setting Claude Code writes."""
+
     plugins = home / ".claude" / "plugins"
     plugins.mkdir(parents=True, exist_ok=True)
     (plugins / "installed_plugins.json").write_text(
-        json.dumps(
-            {"version": 2, "plugins": {"agent-efficiency@agent-efficiency": records}}
-        ),
+        json.dumps({"version": 2, "plugins": {PLUGIN_ID: records}}),
         encoding="utf-8",
+    )
+    if user_enabled is not None:
+        write_json(
+            home / ".claude" / "settings.json",
+            {"enabledPlugins": {PLUGIN_ID: user_enabled}},
+        )
+
+
+def write_json(path: Path, value: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+
+def trust(home: Path, folder: Path) -> None:
+    """Record accepted workspace trust the way Claude Code saves it."""
+
+    write_json(
+        home / ".claude.json",
+        {"projects": {str(folder): {"hasTrustDialogAccepted": True}}},
     )
 
 
@@ -138,14 +162,22 @@ def codex_install(home: Path, *, enabled: bool = True) -> Path:
     return codex / "plugins" / "cache" / "agent-efficiency" / "agent-efficiency"
 
 
+def run_doctor(home: Path, folder: Path | None = None) -> tuple[int, dict]:
+    folder = folder or home / "work"
+    folder.mkdir(parents=True, exist_ok=True)
+    with (
+        isolated_home(home),
+        contextlib.redirect_stdout(io.StringIO()) as output,
+    ):
+        code = main(
+            ["--data-dir", str(home / "data"), "doctor", "--json", "--cwd", str(folder)]
+        )
+    return code, json.loads(output.getvalue())
+
+
 class InstalledHostTests(unittest.TestCase):
     def doctor(self, home: Path) -> tuple[int, dict]:
-        with (
-            isolated_home(home),
-            contextlib.redirect_stdout(io.StringIO()) as output,
-        ):
-            code = main(["--data-dir", str(home / "data"), "doctor", "--json"])
-        return code, json.loads(output.getvalue())
+        return run_doctor(home)
 
     def test_hosts_that_are_not_installed_are_reported_as_such(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -223,7 +255,16 @@ class InstalledHostTests(unittest.TestCase):
                 mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(home / "config")}),
                 contextlib.redirect_stdout(io.StringIO()) as output,
             ):
-                main(["--data-dir", str(home / "data"), "doctor", "--json"])
+                main(
+                    [
+                        "--data-dir",
+                        str(home / "data"),
+                        "doctor",
+                        "--json",
+                        "--cwd",
+                        str(home),
+                    ]
+                )
         claude = json.loads(output.getvalue())["installed_hosts"]["claude"]
         self.assertTrue(claude["installed"])
         self.assertTrue(claude["ready"])
@@ -292,7 +333,9 @@ class InstalledHostTests(unittest.TestCase):
                 isolated_home(home),
                 contextlib.redirect_stdout(io.StringIO()) as output,
             ):
-                code = main(["--data-dir", str(home / "data"), "doctor"])
+                code = main(
+                    ["--data-dir", str(home / "data"), "doctor", "--cwd", str(home)]
+                )
         text = output.getvalue()
         self.assertEqual(code, 0, text)
         self.assertIn(f"Package files at {PLUGIN_ROOT}: ready", text)
@@ -301,6 +344,250 @@ class InstalledHostTests(unittest.TestCase):
         )
         self.assertIn("Codex: not installed", text)
         self.assertIn("Cursor: not installed", text)
+
+
+class FolderEnablementTests(unittest.TestCase):
+    """Which Claude Code install runs in a folder, and whether it is enabled.
+
+    Claude Code reads enabledPlugins from the user settings, then the folder's
+    .claude/settings.json, then .claude/settings.local.json, and the last file
+    that names the plugin decides. A project or local install record applies
+    in its own project folder.
+    """
+
+    def setUp(self) -> None:
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.home = Path(temp.name)
+        self.cache = plugin_copy(self.home / "cache" / "0.2.1")
+        self.project = self.home / "work" / "app"
+        self.project.mkdir(parents=True)
+
+    def folder(self, doctor: dict) -> dict:
+        return doctor["installed_hosts"]["claude"]["this_folder"]
+
+    def test_user_install_is_enabled_everywhere(self) -> None:
+        claude_install(self.home, [claude_record(self.cache)])
+        code, doctor = run_doctor(self.home, self.project)
+        self.assertEqual(code, 0)
+        folder = self.folder(doctor)
+        self.assertEqual(folder["status"], "enabled")
+        self.assertEqual(folder["scope"], "user")
+        self.assertEqual(
+            folder["decided_by"], str(self.home / ".claude" / "settings.json")
+        )
+
+    def test_project_install_disabled_in_its_folder_fails(self) -> None:
+        claude_install(
+            self.home,
+            [
+                claude_record(self.cache),
+                claude_record(
+                    self.cache, scope="project", projectPath=str(self.project)
+                ),
+            ],
+        )
+        write_json(
+            self.project / ".claude" / "settings.json",
+            {"enabledPlugins": {PLUGIN_ID: False}},
+        )
+        code, doctor = run_doctor(self.home, self.project)
+        self.assertEqual(code, 1)
+        self.assertFalse(doctor["ok"])
+        folder = self.folder(doctor)
+        self.assertEqual(folder["status"], "installed but disabled in this folder")
+        self.assertEqual(folder["scope"], "project")
+        self.assertEqual(
+            folder["decided_by"], str(self.project / ".claude" / "settings.json")
+        )
+        fixes = " ".join(folder["fixes"])
+        self.assertIn(
+            f"claude plugin enable {PLUGIN_ID} --scope project", fixes
+        )
+        self.assertIn(
+            f"claude plugin uninstall {PLUGIN_ID} --scope project --keep-data", fixes
+        )
+
+    def test_local_settings_override_project_settings(self) -> None:
+        claude_install(
+            self.home,
+            [claude_record(self.cache, scope="local", projectPath=str(self.project))],
+            user_enabled=None,
+        )
+        write_json(
+            self.project / ".claude" / "settings.json",
+            {"enabledPlugins": {PLUGIN_ID: True}},
+        )
+        write_json(
+            self.project / ".claude" / "settings.local.json",
+            {"enabledPlugins": {PLUGIN_ID: False}},
+        )
+        code, doctor = run_doctor(self.home, self.project)
+        self.assertEqual(code, 1)
+        folder = self.folder(doctor)
+        self.assertEqual(folder["status"], "installed but disabled in this folder")
+        self.assertIn("--scope local", " ".join(folder["fixes"]))
+
+    def test_project_install_in_an_untrusted_folder_is_still_enabled(self) -> None:
+        # Claude Code 2.1.280 drops an untrusted folder's permission rules but
+        # still reads its enabledPlugins, so trust is reported, not failed.
+        claude_install(
+            self.home,
+            [
+                claude_record(self.cache),
+                claude_record(
+                    self.cache, scope="project", projectPath=str(self.project)
+                ),
+            ],
+        )
+        write_json(
+            self.project / ".claude" / "settings.json",
+            {"enabledPlugins": {PLUGIN_ID: True}},
+        )
+        code, doctor = run_doctor(self.home, self.project)
+        self.assertEqual(code, 0)
+        folder = self.folder(doctor)
+        self.assertEqual(folder["status"], "enabled")
+        self.assertEqual(folder["scope"], "project")
+        self.assertFalse(folder["trusted"])
+
+    def test_trusted_project_folder_is_enabled(self) -> None:
+        claude_install(
+            self.home,
+            [claude_record(self.cache, scope="project", projectPath=str(self.project))],
+            user_enabled=None,
+        )
+        write_json(
+            self.project / ".claude" / "settings.json",
+            {"enabledPlugins": {PLUGIN_ID: True}},
+        )
+        trust(self.home, self.project)
+        code, doctor = run_doctor(self.home, self.project)
+        self.assertEqual(code, 0)
+        folder = self.folder(doctor)
+        self.assertEqual(folder["status"], "enabled")
+        self.assertTrue(folder["trusted"])
+
+    def test_trust_saved_for_a_parent_folder_counts(self) -> None:
+        claude_install(self.home, [claude_record(self.cache)])
+        trust(self.home, self.home / "work")
+        _, doctor = run_doctor(self.home, self.project)
+        self.assertTrue(self.folder(doctor)["trusted"])
+
+    def test_project_record_for_another_folder_leaves_the_user_install(self) -> None:
+        other = self.home / "work" / "other"
+        claude_install(
+            self.home,
+            [
+                claude_record(self.cache),
+                claude_record(self.cache, scope="project", projectPath=str(other)),
+            ],
+        )
+        write_json(other / ".claude" / "settings.json", {"enabledPlugins": {PLUGIN_ID: False}})
+        code, doctor = run_doctor(self.home, self.project)
+        self.assertEqual(code, 0)
+        folder = self.folder(doctor)
+        self.assertEqual(folder["status"], "enabled")
+        self.assertEqual(folder["scope"], "user")
+
+    def test_project_only_install_is_not_enabled_elsewhere(self) -> None:
+        claude_install(
+            self.home,
+            [claude_record(self.cache, scope="project", projectPath=str(self.project))],
+            user_enabled=None,
+        )
+        write_json(
+            self.project / ".claude" / "settings.json",
+            {"enabledPlugins": {PLUGIN_ID: True}},
+        )
+        code, doctor = run_doctor(self.home, self.home / "work" / "other")
+        self.assertEqual(code, 1)
+        folder = self.folder(doctor)
+        self.assertEqual(folder["status"], "installed but not enabled in this folder")
+        self.assertIn(f"claude plugin install {PLUGIN_ID}", " ".join(folder["fixes"]))
+
+    def test_a_git_subfolder_uses_the_repository_settings(self) -> None:
+        subprocess.run(["git", "init", "-q", str(self.project)], check=True)
+        nested = self.project / "src" / "pkg"
+        nested.mkdir(parents=True)
+        claude_install(
+            self.home,
+            [claude_record(self.cache, scope="project", projectPath=str(self.project))],
+            user_enabled=None,
+        )
+        write_json(
+            self.project / ".claude" / "settings.json",
+            {"enabledPlugins": {PLUGIN_ID: True}},
+        )
+        code, doctor = run_doctor(self.home, nested)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.folder(doctor)["scope"], "project")
+
+    def test_claude_config_dir_moves_user_settings_and_trust(self) -> None:
+        config = self.home / "config"
+        claude_install(self.home, [claude_record(self.cache)], user_enabled=None)
+        (self.home / ".claude").rename(config)
+        write_json(config / "settings.json", {"enabledPlugins": {PLUGIN_ID: True}})
+        write_json(
+            config / ".claude.json",
+            {"projects": {str(self.project): {"hasTrustDialogAccepted": True}}},
+        )
+        with (
+            isolated_home(self.home),
+            mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(config)}),
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
+            main(
+                [
+                    "--data-dir",
+                    str(self.home / "data"),
+                    "doctor",
+                    "--json",
+                    "--cwd",
+                    str(self.project),
+                ]
+            )
+        folder = json.loads(output.getvalue())["installed_hosts"]["claude"][
+            "this_folder"
+        ]
+        self.assertEqual(folder["status"], "enabled")
+        self.assertEqual(folder["decided_by"], str(config / "settings.json"))
+        self.assertTrue(folder["trusted"])
+
+    def test_text_output_names_the_folder_problem_and_both_fixes(self) -> None:
+        claude_install(
+            self.home,
+            [
+                claude_record(self.cache),
+                claude_record(
+                    self.cache, scope="project", projectPath=str(self.project)
+                ),
+            ],
+        )
+        write_json(
+            self.project / ".claude" / "settings.json",
+            {"enabledPlugins": {PLUGIN_ID: False}},
+        )
+        with (
+            isolated_home(self.home),
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
+            code = main(
+                [
+                    "--data-dir",
+                    str(self.home / "data"),
+                    "doctor",
+                    "--cwd",
+                    str(self.project),
+                ]
+            )
+        text = output.getvalue()
+        self.assertEqual(code, 1)
+        self.assertIn(
+            f"Claude Code in {self.project}: installed but disabled in this folder",
+            text,
+        )
+        self.assertEqual(text.count("  fix: "), 2, text)
 
 
 if __name__ == "__main__":
