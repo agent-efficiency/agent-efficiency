@@ -415,5 +415,69 @@ class VerificationResultTests(unittest.TestCase):
         self.assertIn("exit_nonzero", output)
 
 
+class ReceiptColumnRaceTests(unittest.TestCase):
+    def test_two_first_writers_on_an_older_database_both_record(self) -> None:
+        import sqlite3
+        import threading
+        import time as clock
+
+        from agent_efficiency import store as store_module
+
+        with tempfile.TemporaryDirectory() as temp:
+            store = Store(temp)
+            with store.connect() as conn:
+                conn.execute("ALTER TABLE verification_receipts DROP COLUMN reason_code")
+
+            class SlowConnection(sqlite3.Connection):
+                """Widen the gap between reading the columns and adding one."""
+
+                def execute(self, sql, *args):
+                    cursor = super().execute(sql, *args)
+                    if sql.startswith("PRAGMA table_info(verification_receipts)"):
+                        rows = cursor.fetchall()
+                        clock.sleep(0.3)
+                        return iter(rows)
+                    return cursor
+
+            real_connect = sqlite3.connect
+
+            def connect(*args, **kwargs):
+                return real_connect(*args, factory=SlowConnection, **kwargs)
+
+            receipt = {
+                "check_id": "unit",
+                "check_digest": "sha256:" + "0" * 64,
+                "workspace_digest": None,
+                "git_commit": None,
+                "dirty": False,
+                "started_at": "2026-09-30T00:00:00Z",
+                "finished_at": "2026-09-30T00:00:01Z",
+                "duration_ms": 1,
+                "exit_code": 1,
+                "result": "fail",
+                "runner_version": "test",
+                "schema_version": 1,
+                "reason_code": "exit_nonzero",
+            }
+            results: list[object] = []
+
+            def record() -> None:
+                try:
+                    results.append(
+                        store.record_verification_receipt(receipt, project_key="p")
+                    )
+                except Exception as exc:  # noqa: BLE001 - reported below
+                    results.append(exc)
+
+            with patch.object(store_module.sqlite3, "connect", side_effect=connect):
+                threads = [threading.Thread(target=record) for _ in range(2)]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+            self.assertTrue(all(isinstance(item, int) for item in results), results)
+            self.assertEqual(len(store.verification_receipts("p")), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

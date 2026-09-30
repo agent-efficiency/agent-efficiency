@@ -107,17 +107,36 @@ def _add_receipt_reason_column(conn: sqlite3.Connection) -> None:
     """Add the reason column to a receipt table made by an earlier release.
 
     The column is added in place rather than through a schema version, so an
-    earlier release can still open the same database.
+    earlier release can still open the same database. The check and the
+    change run in one write transaction, so two processes that start on an
+    older database at once cannot both try to add the column.
     """
 
-    columns = {
-        str(column[1])
-        for column in conn.execute("PRAGMA table_info(verification_receipts)")
-    }
-    if columns and "reason_code" not in columns:
-        conn.execute(
-            f"ALTER TABLE verification_receipts ADD COLUMN {RECEIPT_REASON_COLUMN}"
-        )
+    owned = not conn.in_transaction
+    if owned:
+        conn.execute("BEGIN IMMEDIATE")
+    try:
+        columns = {
+            str(column[1])
+            for column in conn.execute("PRAGMA table_info(verification_receipts)")
+        }
+        if columns and "reason_code" not in columns:
+            try:
+                conn.execute(
+                    "ALTER TABLE verification_receipts ADD COLUMN "
+                    f"{RECEIPT_REASON_COLUMN}"
+                )
+            except sqlite3.OperationalError as exc:
+                # Another connection that did not take the write lock first,
+                # such as an earlier process of this release, added it.
+                if "duplicate column name" not in str(exc):
+                    raise
+        if owned:
+            conn.commit()
+    except BaseException:
+        if owned:
+            conn.rollback()
+        raise
 
 
 def utc_now() -> str:
