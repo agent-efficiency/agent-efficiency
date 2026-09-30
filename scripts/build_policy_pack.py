@@ -10,7 +10,16 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT = ROOT / "plugins" / "agent-efficiency" / "policies" / "bundled" / "core.json"
+OUTPUT = (
+    ROOT
+    / "plugins"
+    / "agent-efficiency"
+    / "src"
+    / "agent_efficiency"
+    / "bundled"
+    / "policies"
+    / "core.json"
+)
 REVIEWED_AT = "2026-08-26T00:00:00Z"
 EXPIRES_AT = "2036-08-26T00:00:00Z"
 SOURCE_URL = "https://github.com/agent-efficiency/agent-efficiency"

@@ -29,7 +29,12 @@ from agent_efficiency.capability_retrieval import (
 from agent_efficiency.hook import format_session_status
 from agent_efficiency.host_data import settle_data_dir, unused_host_stores
 from agent_efficiency.models import VALID_MODES
-from agent_efficiency.paths import PLUGIN_ROOT, is_private
+from agent_efficiency.paths import (
+    PACKAGE_DIR,
+    PLUGIN_ROOT,
+    in_plugin_folder,
+    is_private,
+)
 from agent_efficiency.policy import PolicyPack
 from agent_efficiency.python_support import (
     MINIMUM_PYTHON,
@@ -738,7 +743,21 @@ def _format_evidence(values: list[dict[str, Any]]) -> str:
 
 
 def _smoke_test(args: argparse.Namespace) -> int:
-    script = PLUGIN_ROOT / "scripts" / "agent_efficiency_hook.py"
+    if in_plugin_folder(PLUGIN_ROOT):
+        # The same command the hosts run: the plugin's hook script, without
+        # the site directory.
+        root = PLUGIN_ROOT
+        command = [sys.executable, "-S", str(root / "scripts" / "agent_efficiency_hook.py")]
+        described = str(command[-1])
+    else:
+        # An installed package has no plugin folder and no hook script. Its
+        # hook entry point runs the same dispatcher.
+        root = PACKAGE_DIR
+        command = [sys.executable, "-m", "agent_efficiency.hook_entry"]
+        described = (
+            "python -m agent_efficiency.hook_entry (this installed package has "
+            "no plugin folder)"
+        )
     with tempfile.TemporaryDirectory() as temporary:
         environment = dict(os.environ)
         environment["AGENT_EFFICIENCY_DATA"] = str(Path(temporary) / "data")
@@ -750,11 +769,11 @@ def _smoke_test(args: argparse.Namespace) -> int:
         ):
             environment.pop(key, None)
         if args.host == "claude":
-            environment["CLAUDE_PLUGIN_ROOT"] = str(PLUGIN_ROOT)
+            environment["CLAUDE_PLUGIN_ROOT"] = str(root)
             identity = {"session_id": "smoke-claude"}
             events = ("SessionStart", "UserPromptSubmit")
         elif args.host == "codex":
-            environment["PLUGIN_ROOT"] = str(PLUGIN_ROOT)
+            environment["PLUGIN_ROOT"] = str(root)
             identity = {"session_id": "smoke-codex"}
             events = ("SessionStart", "UserPromptSubmit")
         else:
@@ -766,12 +785,12 @@ def _smoke_test(args: argparse.Namespace) -> int:
             events = ("sessionStart", "beforeSubmitPrompt")
         base = {**identity, "cwd": temporary}
         started = _run_smoke_event(
-            script,
+            command,
             {**base, "hook_event_name": events[0]},
             environment,
         )
         status = _run_smoke_event(
-            script,
+            command,
             {
                 **base,
                 "hook_event_name": events[1],
@@ -786,9 +805,9 @@ def _smoke_test(args: argparse.Namespace) -> int:
     result = {
         "ok": started[0] == 0 and status.get("returncode") == 0 and shape_valid,
         "host": args.host,
-        # The hook script in the package this command runs from. It is not
+        # The hook command of the package this command runs from. It is not
         # necessarily the copy a host installed; doctor checks that copy.
-        "command_under_test": str(script),
+        "command_under_test": described,
         "installed_copy": (
             "not tested here; run agent-efficiency doctor to check the copy "
             "each host installed"
@@ -801,12 +820,12 @@ def _smoke_test(args: argparse.Namespace) -> int:
 
 
 def _run_smoke_event(
-    script: Path,
+    command: list[str],
     payload: dict[str, Any],
     environment: dict[str, str],
 ) -> tuple[int, dict[str, Any]] | dict[str, Any]:
     completed = subprocess.run(
-        [sys.executable, "-S", str(script)],
+        command,
         input=json.dumps(payload),
         text=True,
         capture_output=True,
@@ -921,12 +940,26 @@ def _plugin_folder_status(root: Path, host: str) -> dict[str, Any]:
 
 
 def _host_package_status() -> dict[str, dict[str, Any]]:
-    """Check the plugin files this command runs from, for every host."""
+    """Check the plugin files this command runs from, for every host.
 
+    An installed wheel has no plugin folder, so there are no host files to
+    check; each host then reports ready as None rather than failing.
+    """
+
+    in_plugin = in_plugin_folder(PLUGIN_ROOT)
     result: dict[str, dict[str, Any]] = {}
     for host in HOST_SPECS:
-        status = _plugin_folder_status(PLUGIN_ROOT, host)
-        status.pop("version")
+        if in_plugin:
+            status = _plugin_folder_status(PLUGIN_ROOT, host)
+            status.pop("version")
+        else:
+            status = {
+                "manifest_ready": None,
+                "hooks_ready": None,
+                "event_count": 0,
+                "ready": None,
+                "not_ready_reasons": [],
+            }
         supported_capabilities = sorted(
             {
                 capability
@@ -1177,9 +1210,13 @@ def _doctor(store: Store) -> dict[str, Any]:
         "claude": hosts["claude"]["cli_version"],
         "cursor": hosts["cursor"]["cli_version"],
         "codex": hosts["codex"]["cli_version"],
-        "package_root": str(PLUGIN_ROOT),
+        "package_root": str(PLUGIN_ROOT) if in_plugin_folder(PLUGIN_ROOT) else None,
         "hosts": hosts,
-        "host_packages_ready": all(host["ready"] for host in hosts.values()),
+        "host_packages_ready": (
+            all(host["ready"] for host in hosts.values())
+            if in_plugin_folder(PLUGIN_ROOT)
+            else None
+        ),
         "installed_hosts": installed,
         "installed_hosts_ready": all(
             host["ready"] is not False for host in installed.values()
@@ -1197,7 +1234,7 @@ def _doctor(store: Store) -> dict[str, Any]:
         and checks["database_ready"]
         and checks["active_policy_count"]
         and checks["embedded_capability_pack_ready"]
-        and checks["host_packages_ready"]
+        and checks["host_packages_ready"] is not False
         and checks["installed_hosts_ready"]
     )
     return checks
@@ -1300,6 +1337,12 @@ def _format_doctor(result: dict[str, Any]) -> str:
 
 
 def _format_package(root: Any, hosts: dict[str, Any]) -> list[str]:
+    if root is None:
+        return [
+            "Package files: none here. This is an installed Python package "
+            "with no plugin folder, so there are no host files to check; the "
+            "copy each host installed is checked below."
+        ]
     ready = all(host["ready"] for host in hosts.values())
     lines = [f"Package files at {root}: {'ready' if ready else 'not ready'}"]
     for host, status in hosts.items():

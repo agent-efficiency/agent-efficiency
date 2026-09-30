@@ -34,3 +34,6 @@ package-dir = { "" = "plugins/agent-efficiency/src" }
 
 [tool.setuptools.packages.find]
 where = ["plugins/agent-efficiency/src"]
+
+[tool.setuptools.package-data]
+agent_efficiency = ["bundled/*/*.json"]

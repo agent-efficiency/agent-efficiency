@@ -90,7 +90,7 @@ environment values are not written to the database.
 ## Policy selection
 
 Operational policies are bundled under
-`plugins/agent-efficiency/policies/bundled/core.json`.
+`plugins/agent-efficiency/src/agent_efficiency/bundled/policies/core.json`.
 
 They cover:
 
@@ -270,11 +270,11 @@ plugins/agent-efficiency/
   .cursor-plugin/
   .codex-plugin/
   hooks/
-  policies/
-  capabilities/bundled/
   skills/
   scripts/
   src/agent_efficiency/
+  src/agent_efficiency/bundled/policies/
+  src/agent_efficiency/bundled/capabilities/
   src/agent_efficiency/vault/
 
 scripts/
@@ -285,5 +285,8 @@ tests/
   fixtures/hosts/
 ```
 
-The installed plugin is self-contained. Repository tooling validates that no
+The installed plugin is self-contained. The bundled policy and guidance packs
+live inside the Python package, so a plain `pip install` or `pipx install` of
+the repository finds them too; that install has no plugin folder, and
+`doctor` and `smoke-test` say so. Repository tooling validates that no
 external project tree or mixed-license source is included.

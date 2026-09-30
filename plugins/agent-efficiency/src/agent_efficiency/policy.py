@@ -14,7 +14,7 @@ from agent_efficiency.capability_pack import (
     load_bundled_capability_pack,
 )
 from agent_efficiency.models import Nudge, TaskFacts, ToolFacts
-from agent_efficiency.paths import PLUGIN_ROOT, RuntimePaths
+from agent_efficiency.paths import RuntimePaths, bundled_file
 
 
 DOC_EXTENSIONS = {".md", ".mdx", ".rst", ".txt", ".adoc"}
@@ -82,7 +82,7 @@ class PolicyPack:
         *,
         include_first_party: bool = True,
     ) -> "PolicyPack":
-        bundled = PLUGIN_ROOT / "policies" / "bundled" / "core.json"
+        bundled = bundled_file("policies", "core.json")
         documents = [_read_json(bundled)]
         first_party_policies: list[dict[str, Any]] = []
         if include_first_party:

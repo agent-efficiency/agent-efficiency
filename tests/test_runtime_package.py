@@ -24,7 +24,11 @@ class RuntimePackageTests(unittest.TestCase):
             "schemas/sources.schema.json",
         )
         self.assertTrue(all(not (PLUGIN_ROOT / path).exists() for path in forbidden))
-        self.assertTrue((PLUGIN_ROOT / "capabilities/bundled/base-pack.json").is_file())
+        self.assertTrue(
+            (
+                PLUGIN_ROOT / "src/agent_efficiency/bundled/capabilities/base-pack.json"
+            ).is_file()
+        )
 
     def test_cache_free_installed_tree_stays_below_600_kib(self) -> None:
         files = [

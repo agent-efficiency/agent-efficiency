@@ -24,4 +24,5 @@ jobs:
       - run: python scripts/build_policy_pack.py --check
       - run: python scripts/build_guidance_pack.py --check
       - run: python scripts/validate_distribution.py
+      - run: python scripts/check_wheel_install.py
       - run: python -m agent_efficiency doctor --json

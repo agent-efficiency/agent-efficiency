@@ -15,8 +15,10 @@ OUTPUT = (
     ROOT
     / "plugins"
     / "agent-efficiency"
-    / "capabilities"
+    / "src"
+    / "agent_efficiency"
     / "bundled"
+    / "capabilities"
     / "base-pack.json"
 )
 PUBLISHED_AT = "2026-08-26T00:00:00Z"

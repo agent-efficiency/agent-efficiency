@@ -8,7 +8,29 @@ from typing import Mapping
 
 
 PACKAGE_DIR = Path(__file__).resolve().parent
+# The plugin folder the package runs from, when it runs from one. An installed
+# wheel has no plugin folder; see in_plugin_folder.
 PLUGIN_ROOT = PACKAGE_DIR.parents[1]
+BUNDLED_DIR = PACKAGE_DIR / "bundled"
+
+
+def bundled_file(*parts: str) -> Path:
+    """Return a data file shipped inside the package.
+
+    The files live in the package itself, so they are found the same way from
+    the plugin folder and from an installed wheel.
+    """
+
+    return BUNDLED_DIR.joinpath(*parts)
+
+
+def in_plugin_folder(root: Path | None = None) -> bool:
+    """Whether the package runs from a plugin folder rather than a wheel."""
+
+    candidate = PLUGIN_ROOT if root is None else root
+    return (candidate / "scripts" / "agent_efficiency_hook.py").is_file() and (
+        candidate / "hooks"
+    ).is_dir()
 
 # The data folder holds session history and the list of vault trees, so only
 # its owner may read it. These modes are set on what this package creates,
