@@ -16,10 +16,26 @@ CACHE_FOLDERS = frozenset(
 )
 
 
-def is_cache_path(relative: bytes) -> bool:
-    """Whether a path git reports lies inside a tool cache folder."""
+def is_cache_path(root: Path, relative: bytes) -> bool:
+    """Whether a path git reports lies inside a real tool cache folder.
 
-    return any(part in CACHE_FOLDERS for part in relative.split(b"/"))
+    Only content beneath a folder with a cache name counts, and every such
+    folder on the way must be a real directory. A file or a symlink that only
+    carries a cache name is an ordinary workspace change, and a symlink still
+    gets the check that it stays inside the workspace.
+    """
+
+    parts = relative.split(b"/")
+    found = False
+    for depth, part in enumerate(parts[:-1], start=1):
+        if part not in CACHE_FOLDERS:
+            continue
+        names = (item.decode("utf-8", "surrogateescape") for item in parts[:depth])
+        folder = root.joinpath(*names)
+        if folder.is_symlink() or not folder.is_dir():
+            return False
+        found = True
+    return found
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,7 +66,7 @@ def workspace_state(root: Path, config_digest: str) -> WorkspaceState:
             for name in _git(
                 root, "ls-files", "--others", "--exclude-standard", "-z"
             ).split(b"\0")
-            if not is_cache_path(name)
+            if not is_cache_path(root, name)
         ]
         digest = hashlib.sha256()
         digest.update(b"agent-efficiency-workspace-v1\0")

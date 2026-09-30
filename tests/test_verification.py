@@ -305,6 +305,39 @@ class VerificationResultTests(unittest.TestCase):
         self.assertEqual(code, 0, output)
         self.assertIn("check unit: pass", output)
 
+    def test_a_symlink_named_like_a_cache_folder_is_not_ignored(self) -> None:
+        outside = Path(self.temp.name) / "outside"
+        outside.mkdir()
+        (outside / "secret.txt").write_text("outside the workspace\n")
+        for name in ("__pycache__", "tests/__pycache__", ".pytest_cache"):
+            with self.subTest(name=name):
+                self.write_config(
+                    [
+                        sys.executable,
+                        "-c",
+                        "import os, sys; os.symlink(sys.argv[1], sys.argv[2])",
+                        str(outside),
+                        name,
+                    ]
+                )
+                code, output = self.cli("check", "unit")
+                self.assertEqual(code, 1, output)
+                self.assertIn("check unit: inconclusive", output)
+                (self.root / name).unlink()
+
+    def test_a_file_named_like_a_cache_folder_is_a_change(self) -> None:
+        self.write_config(
+            [
+                sys.executable,
+                "-c",
+                "open('__pycache__', 'w').write('not a folder')",
+            ]
+        )
+        code, output = self.cli("check", "unit")
+        self.assertEqual(code, 1, output)
+        self.assertIn("check unit: inconclusive", output)
+        self.assertIn("workspace_changed", output)
+
     def test_check_environment_turns_off_bytecode_files(self) -> None:
         self.write_config(
             [
