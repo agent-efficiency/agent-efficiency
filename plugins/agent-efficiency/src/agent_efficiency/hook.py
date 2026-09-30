@@ -18,6 +18,7 @@ from agent_efficiency.capability_retrieval import (
     select_capability,
 )
 from agent_efficiency.contracts.effects import CanonicalEffect
+from agent_efficiency.folder_lock import FolderBusy
 from agent_efficiency.host_data import CopyPending, hook_deadline, settle_data_dir
 from agent_efficiency.interventions import render_intervention
 from agent_efficiency.models import Nudge
@@ -70,9 +71,13 @@ def run_hook(
 
     hook_started_ns = time.perf_counter_ns()
     if store is None:
+        deadline = hook_deadline()
         try:
-            store = Store(settle_data_dir(environ=environ, deadline=hook_deadline()))
-        except CopyPending:
+            store = Store(
+                settle_data_dir(environ=environ, deadline=deadline),
+                deadline=deadline,
+            )
+        except (CopyPending, FolderBusy):
             # An old store is still being copied. Recording this event would
             # start a new store without that history, so record nothing; the
             # next event tries the copy again.

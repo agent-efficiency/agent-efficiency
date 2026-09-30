@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from agent_efficiency.models import VALID_MODES
+from agent_efficiency.folder_lock import folder_lock
 from agent_efficiency.paths import RuntimePaths, create_private_file
 
 
@@ -150,17 +151,28 @@ def project_identity(cwd: str | None) -> tuple[str, str]:
 
 
 class Store:
-    def __init__(self, root: str | Path | None = None) -> None:
+    def __init__(
+        self, root: str | Path | None = None, *, deadline: float | None = None
+    ) -> None:
+        """Open the store in ``root``, creating it when it does not exist yet.
+
+        Creating it holds the data folder lock, so it cannot race a copy of an
+        older store into the same folder; see ``folder_lock``. ``deadline`` is
+        how long to wait for that lock; ``FolderBusy`` is raised after it.
+        """
+
         self.paths = RuntimePaths.from_root(root)
         self.paths.ensure()
         if not self.paths.database.is_file() or self._database_is_empty():
-            # SQLite gives its journal files the database's mode, so creating
-            # the file 0600 first keeps all three private.
-            create_private_file(self.paths.database)
-            self._initialize()
+            with folder_lock(self.paths.root, deadline):
+                if not self.paths.database.is_file() or self._database_is_empty():
+                    # SQLite gives its journal files the database's mode, so
+                    # creating the file 0600 first keeps all three private.
+                    create_private_file(self.paths.database)
+                    self._initialize()
 
     def _database_is_empty(self) -> bool:
-        """An empty file is a store another process has only just created."""
+        """An empty file is a store whose creation has not written anything."""
 
         try:
             return self.paths.database.stat().st_size == 0

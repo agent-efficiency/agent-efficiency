@@ -13,9 +13,9 @@ database. The rules that keep old history from being lost:
   folder. A caller that cannot finish the copy gets ``CopyPending`` and must
   not build a store; a hook then records nothing for that event, and the next
   event tries again.
-* One process copies at a time, under an operating system lock that is
-  released when its holder exits, however it exits. The lock file itself is
-  left in place; removing it could let two processes hold two locks.
+* One process copies at a time, under the data folder lock in
+  ``folder_lock``. Creating a fresh store takes the same lock, so neither can
+  replace the other, even for a caller that cannot see the old store.
 * A hook copies against a deadline well inside its time limit: a short wait
   for the lock, and a stepped SQLite backup that stops at the deadline. The
   terminal command has no deadline, so it can finish a copy hooks could not.
@@ -39,6 +39,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 
+from agent_efficiency.folder_lock import LOCK_NAME, FolderBusy, folder_lock
 from agent_efficiency.paths import (
     create_private_file,
     data_dir,
@@ -46,16 +47,9 @@ from agent_efficiency.paths import (
     make_private_dir,
 )
 
-try:
-    import fcntl
-except ImportError:  # pragma: no cover - Windows
-    fcntl = None  # type: ignore[assignment]
-    import msvcrt
-
 DATABASE_NAME = "agent-efficiency.db"
 DATABASE_SIDECARS = ("-wal", "-shm", "-journal")
 COPY_RECORD = "plugin-data-copy.json"
-LOCK_NAME = ".plugin-data-copy.lock"
 STAGING_SUFFIX = ".copy.tmp"
 # A hook has two seconds. Starting Python takes a few hundred milliseconds,
 # so the lock wait and the copy together get one second.
@@ -113,7 +107,7 @@ def settle_data_dir(
 
     env = os.environ if environ is None else environ
     target = data_dir(explicit, env)
-    if data_dir_is_chosen(explicit, env) or (target / DATABASE_NAME).exists():
+    if data_dir_is_chosen(explicit, env) or database_present(target / DATABASE_NAME):
         return target
     adopt_host_store(target, env, deadline=deadline)
     return target
@@ -187,7 +181,7 @@ def adopt_host_store(
 
     target = target.expanduser().resolve()
     database = target / DATABASE_NAME
-    if database.exists():
+    if database_present(database):
         return None
     sources = (
         candidate_sources(target, environ)
@@ -200,8 +194,11 @@ def adopt_host_store(
     try:
         make_private_dir(target)
         with copy_lock(target, deadline):
-            if database.exists():
+            if database_present(database):
                 return None
+            # An empty file is a store whose creation stopped before it
+            # wrote anything; it holds no history.
+            database.unlink(missing_ok=True)
             _remove_staging(target)
             try:
                 _copy_state_files(source, target, deadline)
@@ -224,36 +221,13 @@ def adopt_host_store(
 
 @contextmanager
 def copy_lock(target: Path, deadline: float | None) -> Iterator[None]:
-    """Hold the copy lock for ``target``, waiting at most until ``deadline``."""
+    """Hold the data folder lock, turning a timeout into a passed deadline."""
 
-    descriptor = os.open(target / LOCK_NAME, os.O_RDWR | os.O_CREAT, 0o600)
     try:
-        while not _try_lock(descriptor, blocking=deadline is None):
-            if time.monotonic() >= deadline:  # type: ignore[operator]
-                raise _DeadlinePassed()
-            time.sleep(POLL_SECONDS)
-        yield
-    finally:
-        # Closing the descriptor releases the lock.
-        os.close(descriptor)
-
-
-def _try_lock(descriptor: int, *, blocking: bool) -> bool:
-    if fcntl is not None:
-        flags = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
-        try:
-            fcntl.flock(descriptor, flags)
-        except (BlockingIOError, InterruptedError):
-            return False
-        return True
-    while True:  # pragma: no cover - Windows
-        try:
-            msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
-            return True
-        except OSError:
-            if not blocking:
-                return False
-            time.sleep(POLL_SECONDS)
+        with folder_lock(target, deadline):
+            yield
+    except FolderBusy:
+        raise _DeadlinePassed() from None
 
 
 def _check(deadline: float | None) -> None:
@@ -311,19 +285,24 @@ def _link_new(staged: Path, destination: Path) -> bool:
     """Put ``staged`` at ``destination`` unless a file is already there.
 
     A hard link fails when the name exists, so it never replaces anything. On
-    a file system without hard links the name is checked and then renamed.
-    That is safe because it runs under the copy lock, and every writer of a
-    pending folder takes that lock first.
+    a file system without hard links, the name is first claimed with an
+    exclusive create, which also fails when the name exists, and only that
+    claimed empty file is then replaced. Both run under the folder lock.
     """
 
     try:
         os.link(staged, destination)
+        return True
     except FileExistsError:
         return False
     except OSError:
-        if destination.exists():
-            return False
-        os.rename(staged, destination)
+        pass
+    try:
+        claimed = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return False
+    os.close(claimed)
+    os.replace(staged, destination)
     return True
 
 
@@ -349,6 +328,15 @@ def _write_record(target: Path, source: Path) -> None:
         os.replace(staged, target / COPY_RECORD)
     finally:
         Path(staged).unlink(missing_ok=True)
+
+
+def database_present(database: Path) -> bool:
+    """Whether a store with content exists. An empty file is a stopped create."""
+
+    try:
+        return database.stat().st_size > 0
+    except FileNotFoundError:
+        return False
 
 
 def copied_from(target: Path) -> Path | None:

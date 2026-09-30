@@ -527,6 +527,73 @@ class CopyProtocolTests(unittest.TestCase):
         self.assertEqual(text.returncode, 1)
         self.assertIn("data_copy: Agent Efficiency could not finish", text.stdout)
 
+    def test_a_terminal_that_cannot_see_the_source_waits_for_the_copy(self) -> None:
+        # The copier finds the old store through a custom CLAUDE_CONFIG_DIR
+        # that the terminal does not have.
+        config = self.home / "custom-claude"
+        source = config / "plugins" / "data" / "agent-efficiency-agent-efficiency"
+        source.parent.mkdir(parents=True)
+        self.source.rename(source)
+        copier_environment = isolated_environment(self.home)
+        copier_environment["CLAUDE_CONFIG_DIR"] = str(config)
+        copier_environment["PYTHONPATH"] = str(PLUGIN_ROOT / "src")
+        script = (
+            "import time\n"
+            "from agent_efficiency import host_data\n"
+            "original = host_data._copy_database\n"
+            "def slow(*arguments):\n"
+            "    print('copying', flush=True)\n"
+            "    time.sleep(1.5)\n"
+            "    return original(*arguments)\n"
+            "host_data._copy_database = slow\n"
+            "host_data.settle_data_dir()\n"
+        )
+        copier = subprocess.Popen(
+            [sys.executable, "-c", script],
+            env=copier_environment,
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            self.assertEqual(copier.stdout.readline().strip(), "copying")
+            status = run_cli(isolated_environment(self.home), "status", "--json")
+        finally:
+            copier.wait(timeout=30)
+            copier.stdout.close()
+        self.assertEqual(status.returncode, 0, status.stderr)
+        self.assertEqual(json.loads(status.stdout)["session_id"], "old-history")
+        self.assert_history()
+
+    def test_without_hard_links_a_hook_writing_meanwhile_is_kept(self) -> None:
+        hook_environment = isolated_environment(self.home)
+        hook_environment["AGENT_EFFICIENCY_DATA"] = str(self.target)
+        started: list[subprocess.Popen] = []
+
+        def hook_meanwhile(source: str, destination: str) -> None:
+            if str(destination).endswith("agent-efficiency.db"):
+                started.append(
+                    subprocess.Popen(
+                        [sys.executable, "-S", str(HOOK)],
+                        stdin=subprocess.PIPE,
+                        text=True,
+                        env=hook_environment,
+                    )
+                )
+                started[0].stdin.write(
+                    json.dumps(hook_payload(self.home, "concurrent"))
+                )
+                started[0].stdin.close()
+                time.sleep(0.5)
+            raise PermissionError("hard links are not supported here")
+
+        with mock.patch.object(host_data.os, "link", side_effect=hook_meanwhile):
+            copied = host_data.adopt_host_store(
+                self.target, {"CLAUDE_PLUGIN_DATA": str(self.source)}
+            )
+        self.assertEqual(started[0].wait(timeout=30), 0)
+        self.assertEqual(copied, self.source.resolve())
+        self.assert_history("concurrent")
+
     def test_a_codex_hook_waits_for_the_claude_store_too(self) -> None:
         environment = isolated_environment(self.home)
         environment["PLUGIN_DATA"] = str(self.home / CODEX_DATA)
