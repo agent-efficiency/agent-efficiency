@@ -1216,7 +1216,9 @@ def _doctor(
     installed = _installed_host_status(folder or Path.cwd())
     minimum_python = ".".join(str(part) for part in MINIMUM_PYTHON)
     hook_path, hook_version = _hook_python()
-    hook_python_supported = hook_version is None or (
+    # Hooks run python3 from PATH. One that is missing or does not answer is
+    # a failure, not a pass: the hooks cannot run with it.
+    hook_python_supported = hook_version is not None and (
         unsupported_python_message(
             tuple(int(part) for part in hook_version.split(".")[:3])
         )
@@ -1224,11 +1226,14 @@ def _doctor(
     )
     if hook_path is None:
         hook_python = (
-            "python3 is not on PATH here; hooks run python3 from the host's PATH "
-            f"and need Python {minimum_python} or newer"
+            "python3 is not on PATH here, so hooks cannot run; hooks run python3 "
+            f"from the host's PATH and need Python {minimum_python} or newer"
         )
     elif hook_version is None:
-        hook_python = f"{hook_path} did not report its version"
+        hook_python = (
+            f"{hook_path} did not report its version, so hooks may not run; "
+            f"they need Python {minimum_python} or newer"
+        )
     elif hook_python_supported:
         hook_python = f"{hook_path} is Python {hook_version}, supported"
     else:

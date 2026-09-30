@@ -89,6 +89,27 @@ class PythonSupportTests(unittest.TestCase):
         self.assertIn("3.9.18", output.getvalue())
         self.assertIn("3.11 or newer", output.getvalue())
 
+    def test_doctor_fails_when_hooks_have_no_python(self) -> None:
+        for found, expected in (
+            ((None, None), "python3 is not on PATH"),
+            (("/usr/bin/python3", None), "did not report its version"),
+        ):
+            with (
+                self.subTest(found=found),
+                tempfile.TemporaryDirectory() as temp,
+                isolated_home(temp),
+                mock.patch.object(runtime_cli, "_hook_python", return_value=found),
+                contextlib.redirect_stdout(io.StringIO()) as output,
+            ):
+                code = main(
+                    ["--data-dir", str(Path(temp) / "data"), "doctor", "--json"]
+                )
+            doctor = json.loads(output.getvalue())
+            self.assertEqual(code, 1)
+            self.assertFalse(doctor["ok"])
+            self.assertFalse(doctor["hook_python_supported"])
+            self.assertIn(expected, doctor["hook_python"])
+
 
 if __name__ == "__main__":
     unittest.main()
