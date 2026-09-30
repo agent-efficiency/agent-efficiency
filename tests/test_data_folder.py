@@ -594,6 +594,41 @@ class CopyProtocolTests(unittest.TestCase):
         self.assertEqual(copied, self.source.resolve())
         self.assert_history("concurrent")
 
+    def unreadable(self, folder: Path) -> None:
+        if os.geteuid() == 0:
+            self.skipTest("root reads folders without permission")
+        folder.chmod(0)
+        self.addCleanup(folder.chmod, 0o700)
+
+    def test_an_unreadable_plugin_data_folder_is_not_an_empty_one(self) -> None:
+        terminal = isolated_environment(self.home)
+        for folder in (self.source.parent, self.source):
+            with self.subTest(folder=folder.name):
+                self.unreadable(folder)
+                status = run_cli(terminal, "status", "--json")
+                self.assertEqual(status.returncode, 2, status.stdout)
+                self.assertIn("could not read", status.stderr)
+                self.assertIn(str(folder), status.stderr)
+                completed = run_hook(terminal, hook_payload(self.home, "hidden"))
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                self.assertEqual(completed.stdout, "")
+                doctor = run_cli(terminal, "doctor", "--json")
+                self.assertEqual(doctor.returncode, 1)
+                self.assertIn(str(folder), json.loads(doctor.stdout)["data_copy"])
+                self.assertFalse((self.target / "agent-efficiency.db").exists())
+                folder.chmod(0o700)
+        status = run_cli(terminal, "status", "--json")
+        self.assertEqual(status.returncode, 0, status.stderr)
+        self.assertEqual(json.loads(status.stdout)["session_id"], "old-history")
+        self.assert_history()
+
+    def test_a_missing_plugin_data_folder_allows_a_fresh_store(self) -> None:
+        empty = isolated_environment(self.home / "elsewhere")
+        (self.home / "elsewhere").mkdir()
+        status = run_cli(empty, "status", "--json")
+        self.assertEqual(status.returncode, 0, status.stderr)
+        self.assertIsNone(json.loads(status.stdout)["session"])
+
     def test_a_codex_hook_waits_for_the_claude_store_too(self) -> None:
         environment = isolated_environment(self.home)
         environment["PLUGIN_DATA"] = str(self.home / CODEX_DATA)

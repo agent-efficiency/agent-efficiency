@@ -70,10 +70,21 @@ SKIPPED_NAMES = {
 class CopyPending(Exception):
     """An old store is waiting to be copied and the copy did not finish."""
 
-    def __init__(self, source: Path, target: Path, reason: str) -> None:
+    def __init__(
+        self, source: Path, target: Path, reason: str, *, unreadable: bool = False
+    ) -> None:
         self.source = source
         self.target = target
         self.reason = reason
+        if unreadable:
+            super().__init__(
+                f"Agent Efficiency could not read {source} to look for an "
+                f"earlier data store: {reason}. Nothing was changed, so no "
+                "history is lost. Make that folder readable and run the command "
+                "again, or set AGENT_EFFICIENCY_DATA to use a data folder of "
+                "your choosing."
+            )
+            return
         super().__init__(
             f"Agent Efficiency could not finish copying the earlier data store "
             f"at {source} into {target}: {reason}. Nothing was changed. Run the "
@@ -130,39 +141,74 @@ def host_data_dirs(environ: Mapping[str, str]) -> list[Path]:
 def installed_host_data_dirs(environ: Mapping[str, str]) -> list[Path]:
     """Return plugin data folders that Claude Code and Codex keep for this plugin.
 
-    These are found without any host variable, so every entry point sees a
-    store that only hooks of another host used to write.
+    Folders that could not be listed are left out; ``find_sources`` reports
+    them.
     """
 
+    return _installed_folders(environ)[0]
+
+
+def _installed_folders(
+    environ: Mapping[str, str],
+) -> tuple[list[Path], list[tuple[Path, str]]]:
     home = Path(environ.get("HOME") or Path.home())
     claude = Path(environ.get("CLAUDE_CONFIG_DIR") or home / ".claude")
     codex = Path(environ.get("CODEX_HOME") or home / ".codex")
     found: list[Path] = []
+    problems: list[tuple[Path, str]] = []
     for base in (claude / "plugins" / "data", codex / "plugins" / "data"):
         try:
             children = sorted(base.iterdir())
-        except OSError:
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+        except OSError as exc:
+            problems.append((base, _describe(exc)))
             continue
         for child in children:
-            if child.name.startswith("agent-efficiency") and child.is_dir():
+            if child.name.startswith("agent-efficiency"):
                 folder = child.expanduser().resolve()
                 if folder not in found:
                     found.append(folder)
-    return found
+    return found, problems
+
+
+def find_sources(
+    target: Path, environ: Mapping[str, str]
+) -> tuple[list[Path], list[tuple[Path, str]]]:
+    """Return host folders holding a store, and folders that could not be read.
+
+    The host variables' folders come first. A folder that could not be read
+    might hold history, so it is never treated as empty.
+    """
+
+    folders = host_data_dirs(environ)
+    discovered, problems = _installed_folders(environ)
+    for folder in discovered:
+        if folder not in folders:
+            folders.append(folder)
+    sources: list[Path] = []
+    for folder in folders:
+        if folder == target:
+            continue
+        try:
+            os.stat(folder / DATABASE_NAME)
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+        except OSError as exc:
+            problems.append((folder, _describe(exc)))
+            continue
+        sources.append(folder)
+    return sources, problems
 
 
 def candidate_sources(target: Path, environ: Mapping[str, str]) -> list[Path]:
     """Return host folders holding a store, the host variables' folders first."""
 
-    folders = host_data_dirs(environ)
-    for folder in installed_host_data_dirs(environ):
-        if folder not in folders:
-            folders.append(folder)
-    return [
-        folder
-        for folder in folders
-        if folder != target and (folder / DATABASE_NAME).is_file()
-    ]
+    return find_sources(target, environ)[0]
+
+
+def _describe(exc: OSError) -> str:
+    return exc.strerror or type(exc).__name__
 
 
 def adopt_host_store(
@@ -183,11 +229,14 @@ def adopt_host_store(
     database = target / DATABASE_NAME
     if database_present(database):
         return None
-    sources = (
-        candidate_sources(target, environ)
-        if candidates is None
-        else [folder for folder in candidates if (folder / DATABASE_NAME).is_file()]
-    )
+    if candidates is None:
+        sources, problems = find_sources(target, environ)
+    else:
+        sources = [f for f in candidates if (f / DATABASE_NAME).is_file()]
+        problems = []
+    if problems:
+        folder, reason = problems[0]
+        raise CopyPending(folder, target, reason, unreadable=True)
     if not sources:
         return None
     source = sources[0]
@@ -364,8 +413,16 @@ def unused_host_stores(
     target = target.expanduser().resolve()
     database = target / DATABASE_NAME
     recorded = copied_from(target)
-    unused: list[dict[str, Any]] = []
-    for folder in candidate_sources(target, environ):
+    sources, problems = find_sources(target, environ)
+    unused: list[dict[str, Any]] = [
+        {
+            "path": str(folder),
+            "copied": False,
+            "status": f"could not be read ({reason}), so it may hold history",
+        }
+        for folder, reason in problems
+    ]
+    for folder in sources:
         if not database.exists():
             reason = f": {copy_error}" if copy_error else ""
             unused.append(

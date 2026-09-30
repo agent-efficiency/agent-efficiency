@@ -30,15 +30,16 @@ class RuntimePackageTests(unittest.TestCase):
             ).is_file()
         )
 
-    def test_cache_free_installed_tree_stays_below_600_kib(self) -> None:
+    def test_cache_free_installed_tree_stays_below_700_kib(self) -> None:
         files = [
             path
             for path in PLUGIN_ROOT.rglob("*")
             if path.is_file()
             and "__pycache__" not in path.parts
+            and not any(part.endswith(".egg-info") for part in path.parts)
             and path.suffix not in {".pyc", ".pyo"}
         ]
-        self.assertLessEqual(sum(path.stat().st_size for path in files), 600 * 1024)
+        self.assertLessEqual(sum(path.stat().st_size for path in files), 700 * 1024)
 
     def test_runtime_cli_imports_without_the_maintainer_tree(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

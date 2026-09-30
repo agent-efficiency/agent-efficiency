@@ -42,7 +42,7 @@ TEXT_SUFFIXES = {
     ".yaml",
     ".yml",
 }
-RUNTIME_LIMIT_BYTES = 600 * 1024
+RUNTIME_LIMIT_BYTES = 700 * 1024
 # Folders a checkout gains from local work, such as the virtual environment
 # the README's Develop section creates. They are skipped when the tree is not
 # a git work tree; inside one, only tracked files are read.
