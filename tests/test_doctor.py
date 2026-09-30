@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from agent_efficiency import claude_folder
 from agent_efficiency import cli as runtime_cli
 from agent_efficiency.cli import main
 from agent_efficiency.paths import PLUGIN_ROOT
@@ -42,10 +43,20 @@ def isolated_environment(home: Path) -> dict[str, str]:
     return environment
 
 
+@contextlib.contextmanager
 def isolated_home(home: str | Path):
-    """Point every host location at ``home`` for the duration of a test."""
+    """Point every host location at ``home`` for the duration of a test.
 
-    return mock.patch.dict(os.environ, isolated_environment(Path(home)), clear=True)
+    That includes the managed settings folder, which is ``home/managed``.
+    """
+
+    with (
+        mock.patch.dict(os.environ, isolated_environment(Path(home)), clear=True),
+        mock.patch.dict(
+            claude_folder.MANAGED_DIRS, {sys.platform: Path(home) / "managed"}
+        ),
+    ):
+        yield
 
 
 class DoctorTextTests(unittest.TestCase):
@@ -130,6 +141,32 @@ def claude_install(
         write_json(
             home / ".claude" / "settings.json",
             {"enabledPlugins": {PLUGIN_ID: user_enabled}},
+        )
+
+
+GIT_ENV = {
+    **os.environ,
+    "GIT_AUTHOR_NAME": "test",
+    "GIT_AUTHOR_EMAIL": "test@example.invalid",
+    "GIT_COMMITTER_NAME": "test",
+    "GIT_COMMITTER_EMAIL": "test@example.invalid",
+    "GIT_CONFIG_GLOBAL": os.devnull,
+}
+
+
+def git_repository(folder: Path) -> None:
+    """Make ``folder`` a git repository with one commit."""
+
+    folder.mkdir(parents=True, exist_ok=True)
+    for arguments in (
+        ["init", "-q"],
+        ["commit", "-q", "--allow-empty", "-m", "base"],
+    ):
+        subprocess.run(
+            ["git", "-C", str(folder), *arguments],
+            check=True,
+            capture_output=True,
+            env=GIT_ENV,
         )
 
 
@@ -506,22 +543,139 @@ class FolderEnablementTests(unittest.TestCase):
         self.assertEqual(folder["status"], "installed but not enabled in this folder")
         self.assertIn(f"claude plugin install {PLUGIN_ID}", " ".join(folder["fixes"]))
 
-    def test_a_git_subfolder_uses_the_repository_settings(self) -> None:
-        subprocess.run(["git", "init", "-q", str(self.project)], check=True)
-        nested = self.project / "src" / "pkg"
-        nested.mkdir(parents=True)
-        claude_install(
-            self.home,
-            [claude_record(self.cache, scope="project", projectPath=str(self.project))],
-            user_enabled=None,
+    def test_shared_settings_come_from_the_session_folder(self) -> None:
+        # Claude Code 2.1.280 reads .claude/settings.json in the folder the
+        # session starts in, not at the git root.
+        git_repository(self.project)
+        nested = self.project / "src"
+        nested.mkdir()
+        claude_install(self.home, [claude_record(self.cache)])
+        write_json(
+            nested / ".claude" / "settings.json", {"enabledPlugins": {PLUGIN_ID: False}}
         )
+        code, doctor = run_doctor(self.home, nested)
+        self.assertEqual(code, 1)
+        folder = self.folder(doctor)
+        self.assertEqual(folder["status"], "installed but disabled in this folder")
+        self.assertEqual(folder["decided_by"], str(nested / ".claude" / "settings.json"))
+
+    def test_shared_settings_at_the_git_root_do_not_reach_a_subfolder(self) -> None:
+        git_repository(self.project)
+        nested = self.project / "src"
+        nested.mkdir()
+        claude_install(self.home, [claude_record(self.cache)])
         write_json(
             self.project / ".claude" / "settings.json",
+            {"enabledPlugins": {PLUGIN_ID: False}},
+        )
+        code, doctor = run_doctor(self.home, nested)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.folder(doctor)["status"], "enabled")
+
+    def test_local_settings_live_at_the_repository_root(self) -> None:
+        git_repository(self.project)
+        nested = self.project / "src"
+        nested.mkdir()
+        claude_install(self.home, [claude_record(self.cache)])
+        local = self.project / ".claude" / "settings.local.json"
+        write_json(local, {"enabledPlugins": {PLUGIN_ID: False}})
+        code, doctor = run_doctor(self.home, nested)
+        self.assertEqual(code, 1)
+        self.assertEqual(self.folder(doctor)["decided_by"], str(local))
+        self.assertIn("--scope local", " ".join(self.folder(doctor)["fixes"]))
+
+    def test_a_local_file_in_the_session_folder_still_counts_below_the_root_one(
+        self,
+    ) -> None:
+        git_repository(self.project)
+        nested = self.project / "src"
+        nested.mkdir()
+        claude_install(self.home, [claude_record(self.cache)])
+        write_json(
+            nested / ".claude" / "settings.local.json",
+            {"enabledPlugins": {PLUGIN_ID: False}},
+        )
+        code, doctor = run_doctor(self.home, nested)
+        self.assertEqual(code, 1)
+        write_json(
+            self.project / ".claude" / "settings.local.json",
             {"enabledPlugins": {PLUGIN_ID: True}},
         )
         code, doctor = run_doctor(self.home, nested)
         self.assertEqual(code, 0)
-        self.assertEqual(self.folder(doctor)["scope"], "project")
+        self.assertEqual(
+            self.folder(doctor)["decided_by"],
+            str(self.project / ".claude" / "settings.local.json"),
+        )
+
+    def test_a_worktree_uses_the_main_checkout_local_file(self) -> None:
+        git_repository(self.project)
+        worktree = self.home / "work" / "app-worktree"
+        subprocess.run(
+            ["git", "-C", str(self.project), "worktree", "add", "-q", str(worktree)],
+            check=True,
+            capture_output=True,
+            env=GIT_ENV,
+        )
+        claude_install(self.home, [claude_record(self.cache)])
+        write_json(
+            self.project / ".claude" / "settings.json",
+            {"enabledPlugins": {PLUGIN_ID: False}},
+        )
+        code, doctor = run_doctor(self.home, worktree)
+        self.assertEqual(code, 0, "the main checkout's shared file does not apply")
+        write_json(
+            self.project / ".claude" / "settings.local.json",
+            {"enabledPlugins": {PLUGIN_ID: False}},
+        )
+        code, doctor = run_doctor(self.home, worktree)
+        self.assertEqual(code, 1)
+        self.assertEqual(
+            self.folder(doctor)["decided_by"],
+            str(self.project / ".claude" / "settings.local.json"),
+        )
+
+    def test_a_home_folder_git_root_keeps_local_settings_in_the_session_folder(
+        self,
+    ) -> None:
+        git_repository(self.home)
+        claude_install(self.home, [claude_record(self.cache)])
+        write_json(
+            self.home / ".claude" / "settings.local.json",
+            {"enabledPlugins": {PLUGIN_ID: False}},
+        )
+        code, doctor = run_doctor(self.home, self.project)
+        self.assertEqual(code, 0)
+        write_json(
+            self.project / ".claude" / "settings.local.json",
+            {"enabledPlugins": {PLUGIN_ID: False}},
+        )
+        code, doctor = run_doctor(self.home, self.project)
+        self.assertEqual(code, 1)
+
+    def test_managed_settings_are_read_and_win(self) -> None:
+        managed = self.home / "managed"
+        write_json(
+            managed / "managed-settings.json", {"enabledPlugins": {PLUGIN_ID: True}}
+        )
+        write_json(
+            managed / "managed-settings.d" / "50-plugins.json",
+            {"enabledPlugins": {PLUGIN_ID: False}},
+        )
+        claude_install(self.home, [claude_record(self.cache)])
+        code, doctor = run_doctor(self.home, self.project)
+        self.assertEqual(code, 1)
+        folder = self.folder(doctor)
+        self.assertEqual(
+            folder["decided_by"], str(managed / "managed-settings.d" / "50-plugins.json")
+        )
+        self.assertIn("administrator", " ".join(folder["fixes"]))
+
+    def test_settings_that_cannot_be_read_here_are_named(self) -> None:
+        claude_install(self.home, [claude_record(self.cache)])
+        code, doctor = run_doctor(self.home, self.project)
+        self.assertEqual(code, 0)
+        self.assertIn("not checked", self.folder(doctor)["not_checked"])
 
     def test_claude_config_dir_moves_user_settings_and_trust(self) -> None:
         config = self.home / "config"

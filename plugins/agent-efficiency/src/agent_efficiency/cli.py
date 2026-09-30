@@ -1010,6 +1010,7 @@ def _installed_host_status(folder: Path) -> dict[str, dict[str, Any]]:
             claude["installs"],
             user_settings=user_settings,
             trust_file=trust_file,
+            home=home,
         )
         claude["this_folder"] = here
         if not here["ready"]:
@@ -1430,11 +1431,13 @@ def _format_folder(name: str, here: dict[str, Any]) -> list[str]:
     if here["ready"]:
         return [
             f"{name} in {here['folder']}: enabled by {here['decided_by']}, "
-            f"{here['scope']} scope install; {trust}"
+            f"{here['scope']} scope install; {trust}",
+            f"  note: {here['not_checked']}",
         ]
     return [
         f"{name} in {here['folder']}: {here['status']}: {here['reason']}",
         *(f"  fix: {fix}" for fix in here["fixes"]),
+        f"  note: {here['not_checked']}",
     ]
 
 
