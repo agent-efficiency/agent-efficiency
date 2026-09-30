@@ -52,10 +52,17 @@ def _run_one(
     started = _now()
     started_ns = time.perf_counter_ns()
     exit_code: int | None = None
+    reason: str | None = None
     if before.result != "ready":
         result = "inconclusive"
+        reason = "workspace_unknown"
     else:
-        environment = {"PATH": os.environ.get("PATH", "")}
+        environment = {
+            "PATH": os.environ.get("PATH", ""),
+            # A Python check would otherwise write bytecode caches into the
+            # workspace it is checking.
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
         for name in check.env_allowlist:
             if name in os.environ:
                 environment[name] = os.environ[name]
@@ -69,11 +76,21 @@ def _run_one(
             )
             exit_code = completed.returncode
             result = "pass" if exit_code == 0 else "fail"
-        except (OSError, subprocess.TimeoutExpired):
+            if exit_code != 0:
+                reason = "exit_nonzero"
+        except subprocess.TimeoutExpired:
             result = "blocked"
+            reason = "timeout"
+        except OSError:
+            result = "blocked"
+            reason = "not_started"
     after = workspace_state(config.root, config.digest)
-    if result == "pass" and (after.result != "ready" or after.digest != before.digest):
+    if result == "pass" and after.result != "ready":
         result = "inconclusive"
+        reason = "workspace_unreadable"
+    elif result == "pass" and after.digest != before.digest:
+        result = "inconclusive"
+        reason = "workspace_changed"
     receipt = VerificationReceipt(
         check_id=check.check_id,
         check_digest=check.digest,
@@ -89,6 +106,7 @@ def _run_one(
         host=host,
         session_id=session_id,
         turn_id=turn_id,
+        reason_code=reason,
     )
     project_key, _ = project_identity(str(config.root))
     receipt_id = store.record_verification_receipt(

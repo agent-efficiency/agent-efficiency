@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from agent_efficiency.models import VALID_MODES
-from agent_efficiency.paths import RuntimePaths
+from agent_efficiency.folder_lock import folder_lock
+from agent_efficiency.paths import RuntimePaths, create_private_file
 
 
 SCHEMA_VERSION = "7"
@@ -56,6 +57,16 @@ VAULT_EMITTED = ("delivered", "truncated", "deferred")
 # A compact receipt with one of these dispositions handled its compaction.
 VAULT_COMPACTION_HANDLED = (*VAULT_EMITTED, "degraded", "withheld")
 _VAULT_DIGEST = re.compile(r"^[0-9a-f]{16}$")
+# Why a verification result is not a pass. Fixed codes only; the plain sentence
+# for each lives in verification.receipts.REASONS.
+VERIFICATION_REASONS = (
+    "exit_nonzero",
+    "timeout",
+    "not_started",
+    "workspace_unknown",
+    "workspace_changed",
+    "workspace_unreadable",
+)
 
 
 def _sql_choices(values: tuple[str, ...]) -> str:
@@ -87,6 +98,48 @@ CREATE INDEX IF NOT EXISTS vault_receipts_recorded
 """
 
 
+RECEIPT_REASON_COLUMN = (
+    "reason_code TEXT CHECK(reason_code IS NULL OR reason_code IN "
+    f"({_sql_choices(VERIFICATION_REASONS)}))"
+)
+
+
+def _add_receipt_reason_column(conn: sqlite3.Connection) -> None:
+    """Add the reason column to a receipt table made by an earlier release.
+
+    The column is added in place rather than through a schema version, so an
+    earlier release can still open the same database. The check and the
+    change run in one write transaction, so two processes that start on an
+    older database at once cannot both try to add the column.
+    """
+
+    owned = not conn.in_transaction
+    if owned:
+        conn.execute("BEGIN IMMEDIATE")
+    try:
+        columns = {
+            str(column[1])
+            for column in conn.execute("PRAGMA table_info(verification_receipts)")
+        }
+        if columns and "reason_code" not in columns:
+            try:
+                conn.execute(
+                    "ALTER TABLE verification_receipts ADD COLUMN "
+                    f"{RECEIPT_REASON_COLUMN}"
+                )
+            except sqlite3.OperationalError as exc:
+                # Another connection that did not take the write lock first,
+                # such as an earlier process of this release, added it.
+                if "duplicate column name" not in str(exc):
+                    raise
+        if owned:
+            conn.commit()
+    except BaseException:
+        if owned:
+            conn.rollback()
+        raise
+
+
 def utc_now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -98,11 +151,33 @@ def project_identity(cwd: str | None) -> tuple[str, str]:
 
 
 class Store:
-    def __init__(self, root: str | Path | None = None) -> None:
+    def __init__(
+        self, root: str | Path | None = None, *, deadline: float | None = None
+    ) -> None:
+        """Open the store in ``root``, creating it when it does not exist yet.
+
+        Creating it holds the data folder lock, so it cannot race a copy of an
+        older store into the same folder; see ``folder_lock``. ``deadline`` is
+        how long to wait for that lock; ``FolderBusy`` is raised after it.
+        """
+
         self.paths = RuntimePaths.from_root(root)
         self.paths.ensure()
-        if not self.paths.database.is_file():
-            self._initialize()
+        if not self.paths.database.is_file() or self._database_is_empty():
+            with folder_lock(self.paths.root, deadline):
+                if not self.paths.database.is_file() or self._database_is_empty():
+                    # SQLite gives its journal files the database's mode, so
+                    # creating the file 0600 first keeps all three private.
+                    create_private_file(self.paths.database)
+                    self._initialize()
+
+    def _database_is_empty(self) -> bool:
+        """An empty file is a store whose creation has not written anything."""
+
+        try:
+            return self.paths.database.stat().st_size == 0
+        except OSError:
+            return False
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -486,6 +561,7 @@ class Store:
             conn.execute(
                 "INSERT OR IGNORE INTO settings(key, value) VALUES('default_mode', 'advise')"
             )
+            _add_receipt_reason_column(conn)
 
     def _migrate(self) -> None:
         with self.connect() as conn:
@@ -500,6 +576,7 @@ class Store:
                     f"{self.paths.database.name}.schema-{version}.bak"
                 )
                 if not backup_path.exists():
+                    create_private_file(backup_path)
                     with closing(sqlite3.connect(backup_path)) as backup:
                         conn.backup(backup)
             if version == "1":
@@ -2822,6 +2899,7 @@ class Store:
         self.ensure_current_schema()
         now = utc_now()
         with self.connect() as conn:
+            _add_receipt_reason_column(conn)
             conn.execute(
                 """
                 INSERT INTO check_definitions(
@@ -2860,8 +2938,8 @@ class Store:
                     project_key, check_id, check_digest, workspace_digest,
                     git_commit, dirty, started_at, finished_at, duration_ms,
                     exit_code, result, runner_version, host, session_id,
-                    turn_id, schema_version
-                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    turn_id, schema_version, reason_code
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     project_key,
@@ -2880,6 +2958,7 @@ class Store:
                     receipt.get("session_id"),
                     receipt.get("turn_id"),
                     int(receipt["schema_version"]),
+                    receipt.get("reason_code"),
                 ),
             )
             return int(cursor.lastrowid)

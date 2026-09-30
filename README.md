@@ -185,7 +185,8 @@ receipt binds:
 
 - the full Git commit;
 - tracked changes;
-- untracked file content;
+- untracked file content, except inside the tool cache folders
+  `__pycache__`, `.pytest_cache`, `.mypy_cache`, and `.ruff_cache`;
 - the verification configuration;
 - the check result and time.
 
@@ -197,8 +198,10 @@ agent-efficiency evidence list --json
 agent-efficiency evidence show RECEIPT_ID
 ```
 
-Non-Git workspaces and unreadable workspace state are inconclusive. Activity
-counters never count as verification receipts.
+Non-Git workspaces and unreadable workspace state are inconclusive. A check
+that changes files outside those cache folders is also inconclusive. Every
+result that is not a pass records a reason, which `check` and `evidence show`
+print. Activity counters never count as verification receipts.
 
 ## Diagnose the installation
 
@@ -209,9 +212,17 @@ agent-efficiency smoke-test cursor
 agent-efficiency smoke-test codex
 ```
 
-`doctor` checks package metadata, hook manifests, supported capabilities,
-storage, policy data, and the privacy boundary. Smoke tests pass fixture events
-through the packaged host command. They do not replace a live host session.
+`doctor` checks the package files it runs from and the copy each host
+installed: Claude Code and Codex from their install records, and Cursor from
+its local plugin folder. It starts each installed copy's hook command once,
+with an empty event and a temporary data folder, to prove it can run. A host
+that is not installed is reported as not installed, which is not a failure. For Claude Code it also works out which
+install applies in the current folder (or the one `--cwd` names) and whether
+settings enable it there; an install that is disabled or not enabled in that
+folder fails the check, with the command that fixes it. It also checks hook
+manifests, supported capabilities, storage, policy data, and the privacy
+boundary. Smoke tests pass fixture events through the packaged host command.
+They do not replace a live host session.
 
 The fetch-before-branch signal proves only that the current session observed a
 fetch. It does not prove that the remote was current.
@@ -255,9 +266,11 @@ cd ~/notes/vault-core && git init && git config --local core.hooksPath .githooks
 `feedback`, `reference`, `doctrine`, `sessions`), an empty index, and
 pre-commit and pre-push hooks in `.githooks`. Run the same `git` commands in
 each tree. The hooks check what git is about to commit or push: note
-classification, size caps, note schema, duplicate ids, the index, and known
-credential shapes. The pre-push hook also refuses a remote other than the one
-the marker names.
+classification, size caps, note schema, duplicate ids, whether `index.json`
+matches the notes, and known credential shapes. The pre-push hook also refuses a remote other than the one
+the marker names. The hooks run the `agent-efficiency` command, so it must be
+on PATH. Without it they stop the commit or push and print how to install it.
+Run `vault init` again on an existing tree to update its hooks.
 
 A note is markdown with a small frontmatter block:
 
@@ -455,6 +468,7 @@ python -m unittest discover -s tests -v
 python scripts/build_policy_pack.py --check
 python scripts/build_guidance_pack.py --check
 python scripts/validate_distribution.py
+python scripts/check_wheel_install.py
 python -m agent_efficiency doctor
 ```
 

@@ -8,6 +8,40 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+# Cache folders that test and lint tools write into the workspace they run in.
+# Untracked files inside them are not part of the workspace identity, so a
+# check that fills them is still a check of the same files.
+CACHE_FOLDERS = frozenset(
+    {b"__pycache__", b".pytest_cache", b".mypy_cache", b".ruff_cache"}
+)
+
+
+def is_cache_path(root: Path, relative: bytes) -> bool:
+    """Whether a path git reports lies inside a real tool cache folder.
+
+    Only content beneath a folder with a cache name counts, and every such
+    folder on the way must be a real directory. A file or a symlink that only
+    carries a cache name is an ordinary workspace change. A symlink is never
+    skipped, at any depth, so it always gets the check that it stays inside
+    the workspace.
+    """
+
+    parts = relative.split(b"/")
+    path = root.joinpath(*(item.decode("utf-8", "surrogateescape") for item in parts))
+    if path.is_symlink():
+        return False
+    found = False
+    for depth, part in enumerate(parts[:-1], start=1):
+        if part not in CACHE_FOLDERS:
+            continue
+        names = (item.decode("utf-8", "surrogateescape") for item in parts[:depth])
+        folder = root.joinpath(*names)
+        if folder.is_symlink() or not folder.is_dir():
+            return False
+        found = True
+    return found
+
+
 @dataclass(frozen=True, slots=True)
 class WorkspaceState:
     digest: str | None
@@ -31,9 +65,13 @@ def workspace_state(root: Path, config_digest: str) -> WorkspaceState:
         tracked_names = _git(root, "diff", "--name-only", "-z", "HEAD", "--").split(
             b"\0"
         )
-        untracked_names = _git(
-            root, "ls-files", "--others", "--exclude-standard", "-z"
-        ).split(b"\0")
+        untracked_names = [
+            name
+            for name in _git(
+                root, "ls-files", "--others", "--exclude-standard", "-z"
+            ).split(b"\0")
+            if not is_cache_path(root, name)
+        ]
         digest = hashlib.sha256()
         digest.update(b"agent-efficiency-workspace-v1\0")
         digest.update(commit.encode())

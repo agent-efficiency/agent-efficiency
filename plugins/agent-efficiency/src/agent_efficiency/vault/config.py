@@ -13,6 +13,8 @@ import os
 import tempfile
 from pathlib import Path
 
+from agent_efficiency.folder_lock import folder_lock
+from agent_efficiency.paths import make_private_dir
 from agent_efficiency.vault.root import VaultTree, find_tree
 from agent_efficiency.vault.schema import CLASSIFICATIONS
 
@@ -156,7 +158,14 @@ def _paths(config: Path) -> list[str]:
 
 
 def _write(config: Path, trees: list[str]) -> None:
-    config.parent.mkdir(parents=True, exist_ok=True)
+    make_private_dir(config.parent)
+    # A copy of an older store into this folder writes vault.json under the
+    # same lock, and never replaces a list that is already there.
+    with folder_lock(config.parent, None):
+        _replace(config, trees)
+
+
+def _replace(config: Path, trees: list[str]) -> None:
     payload = json.dumps({"schema": CONFIG_SCHEMA, "trees": trees}, indent=2) + "\n"
     handle, staged = tempfile.mkstemp(
         dir=config.parent, prefix=".vault-", suffix=".tmp"

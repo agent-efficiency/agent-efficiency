@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-efficiency"
-version = "0.2.0"
+version = "0.2.1"
 description = "Local verification and efficiency governance for coding agents"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -34,3 +34,6 @@ package-dir = { "" = "plugins/agent-efficiency/src" }
 
 [tool.setuptools.packages.find]
 where = ["plugins/agent-efficiency/src"]
+
+[tool.setuptools.package-data]
+agent_efficiency = ["bundled/*/*.json"]

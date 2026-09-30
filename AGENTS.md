@@ -45,6 +45,7 @@ python -m unittest discover -s tests -v
 python scripts/build_policy_pack.py --check
 python scripts/build_guidance_pack.py --check
 python scripts/validate_distribution.py
+python scripts/check_wheel_install.py
 python -m agent_efficiency doctor --json
 ```
 

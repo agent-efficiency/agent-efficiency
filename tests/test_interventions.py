@@ -202,6 +202,28 @@ class InterventionTests(unittest.TestCase):
         self.assertEqual(payload["intervention"]["feedback"]["judgment"], "useful")
         self.assertNotIn("Run a focused check", output.getvalue())
 
+    def explain(self, *arguments: str) -> tuple[int, str, str]:
+        output, errors = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+            code = main(["--data-dir", self.temp.name, "explain", "last", *arguments])
+        return code, output.getvalue(), errors.getvalue()
+
+    def test_explain_last_with_nothing_recorded_is_not_an_error(self) -> None:
+        code, output, _ = self.explain()
+        self.assertEqual(code, 0)
+        self.assertIn("no recorded intervention", output)
+        code, output, _ = self.explain("--json")
+        self.assertEqual(code, 0)
+        self.assertFalse(json.loads(output)["found"])
+
+    def test_explain_last_still_fails_for_real_errors(self) -> None:
+        code, output, _ = self.explain("--rate", "useful")
+        self.assertEqual(code, 1)
+        self.assertIn("no intervention is available", output)
+        code, output, _ = self.explain("--session", "no-such-session")
+        self.assertEqual(code, 1)
+        self.assertIn("no-such-session", output)
+
     def test_reports_explain_association_and_immutable_utility(self) -> None:
         render_intervention(
             self.store,

@@ -4,7 +4,9 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
@@ -222,6 +224,280 @@ command = ["python", "-V"]
         values = self.store.verification_receipts(key, check_id="unit")
         self.assertEqual(len(values), 1)
         self.assertEqual(values[0]["result"], "pass")
+
+
+def _git(root: Path, *arguments: str) -> None:
+    subprocess.run(["git", *arguments], cwd=root, check=True, capture_output=True)
+
+
+class VerificationResultTests(unittest.TestCase):
+    """A check result says why it is not a pass, and caches do not change it."""
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name) / "project"
+        self.root.mkdir()
+        self.data = str(Path(self.temp.name) / "data")
+        _git(self.root, "init", "-q")
+        _git(self.root, "config", "user.email", "test@example.com")
+        _git(self.root, "config", "user.name", "Test")
+        (self.root / "calc.py").write_text(
+            "def add(a, b):\n    return a + b\n", encoding="utf-8"
+        )
+        tests = self.root / "tests"
+        tests.mkdir()
+        (tests / "test_calc.py").write_text(
+            "import unittest\n\nimport calc\n\n\n"
+            "class CalcTest(unittest.TestCase):\n"
+            "    def test_add(self):\n"
+            "        self.assertEqual(calc.add(1, 2), 3)\n",
+            encoding="utf-8",
+        )
+        _git(self.root, "add", ".")
+        _git(self.root, "commit", "-qm", "base")
+        previous = Path.cwd()
+        os.chdir(self.root)
+        self.addCleanup(os.chdir, previous)
+
+    def cli(self, *arguments: str) -> tuple[int, str]:
+        with (
+            contextlib.redirect_stdout(io.StringIO()) as output,
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            code = main(["--data-dir", self.data, *arguments])
+        return code, output.getvalue()
+
+    def write_config(self, command: list[str]) -> None:
+        (self.root / "agent-efficiency.toml").write_text(
+            'version = 1\nmode = "advise"\n\n[[checks]]\nid = "unit"\n'
+            f"command = {json.dumps(command)}\n"
+            'applies_to = ["**/*.py"]\nrequired_for = ["code"]\n'
+            "timeout_seconds = 60\n",
+            encoding="utf-8",
+        )
+
+    def test_readme_example_passes_on_the_first_run(self) -> None:
+        self.assertEqual(self.cli("init")[0], 0)
+        if shutil.which("python") is None:
+            config = self.root / "agent-efficiency.toml"
+            config.write_text(
+                config.read_text(encoding="utf-8").replace(
+                    '"python"', json.dumps(sys.executable)
+                ),
+                encoding="utf-8",
+            )
+        code, output = self.cli("check", "unit")
+        self.assertEqual(code, 0, output)
+        self.assertIn("check unit: pass", output)
+
+    def test_cache_folders_a_check_writes_do_not_change_the_result(self) -> None:
+        script = (
+            "import pathlib\n"
+            "for name in ('__pycache__', '.pytest_cache', '.mypy_cache', "
+            "'.ruff_cache', 'tests/__pycache__'):\n"
+            "    folder = pathlib.Path(name)\n"
+            "    folder.mkdir(parents=True, exist_ok=True)\n"
+            "    (folder / 'entry.bin').write_bytes(b'cache')\n"
+        )
+        self.write_config([sys.executable, "-c", script])
+        code, output = self.cli("check", "unit")
+        self.assertEqual(code, 0, output)
+        self.assertIn("check unit: pass", output)
+
+    def test_a_symlink_named_like_a_cache_folder_is_not_ignored(self) -> None:
+        outside = Path(self.temp.name) / "outside"
+        outside.mkdir()
+        (outside / "secret.txt").write_text("outside the workspace\n")
+        for name in ("__pycache__", "tests/__pycache__", ".pytest_cache"):
+            with self.subTest(name=name):
+                self.write_config(
+                    [
+                        sys.executable,
+                        "-c",
+                        "import os, sys; os.symlink(sys.argv[1], sys.argv[2])",
+                        str(outside),
+                        name,
+                    ]
+                )
+                code, output = self.cli("check", "unit")
+                self.assertEqual(code, 1, output)
+                self.assertIn("check unit: inconclusive", output)
+                (self.root / name).unlink()
+
+    def test_a_symlink_inside_a_real_cache_folder_is_checked(self) -> None:
+        outside = Path(self.temp.name) / "outside"
+        outside.mkdir()
+        for name in ("__pycache__/escape", "tests/__pycache__/deep/escape"):
+            with self.subTest(name=name):
+                self.write_config(
+                    [
+                        sys.executable,
+                        "-c",
+                        "import os, sys; "
+                        "os.makedirs(os.path.dirname(sys.argv[2]), exist_ok=True); "
+                        "os.symlink(sys.argv[1], sys.argv[2])",
+                        str(outside),
+                        name,
+                    ]
+                )
+                code, output = self.cli("check", "unit")
+                self.assertEqual(code, 1, output)
+                self.assertIn("check unit: inconclusive", output)
+                (self.root / name).unlink()
+
+    def test_a_file_named_like_a_cache_folder_is_a_change(self) -> None:
+        self.write_config(
+            [
+                sys.executable,
+                "-c",
+                "open('__pycache__', 'w').write('not a folder')",
+            ]
+        )
+        code, output = self.cli("check", "unit")
+        self.assertEqual(code, 1, output)
+        self.assertIn("check unit: inconclusive", output)
+        self.assertIn("workspace_changed", output)
+
+    def test_check_environment_turns_off_bytecode_files(self) -> None:
+        self.write_config(
+            [
+                sys.executable,
+                "-c",
+                "import os, sys; "
+                "sys.exit(0 if os.environ.get('PYTHONDONTWRITEBYTECODE') == '1' "
+                "else 3)",
+            ]
+        )
+        self.assertEqual(self.cli("check", "unit")[0], 0)
+
+    def test_a_check_that_edits_a_tracked_file_is_not_a_pass(self) -> None:
+        self.write_config(
+            [
+                sys.executable,
+                "-c",
+                "open('calc.py', 'a').write('# edited by the check\\n')",
+            ]
+        )
+        code, output = self.cli("check", "unit")
+        self.assertEqual(code, 1)
+        self.assertIn("check unit: inconclusive", output)
+        self.assertIn("workspace_changed", output)
+        self.assertIn("changed files in the workspace", output)
+        receipt_id = output.split("(receipt ")[1].split(")")[0]
+        code, shown = self.cli("evidence", "show", receipt_id)
+        self.assertEqual(code, 0)
+        self.assertIn("reason_code: workspace_changed", shown)
+        self.assertIn("reason: The check changed files", shown)
+        code, shown_json = self.cli("evidence", "show", receipt_id, "--json")
+        value = json.loads(shown_json)
+        self.assertEqual(value["reason_code"], "workspace_changed")
+        self.assertIn("changed files", value["reason"])
+        code, listed = self.cli("evidence", "list")
+        self.assertIn("unit: inconclusive: The check changed files", listed)
+
+    def test_a_failing_check_names_its_exit_status(self) -> None:
+        self.write_config([sys.executable, "-c", "raise SystemExit(4)"])
+        code, output = self.cli("check", "unit")
+        self.assertEqual(code, 1)
+        self.assertIn("check unit: fail", output)
+        self.assertIn("exit_nonzero", output)
+        self.assertIn("status 4", output)
+
+    def test_a_check_that_cannot_start_says_so(self) -> None:
+        self.write_config(["agent-efficiency-no-such-program"])
+        code, output = self.cli("check", "unit")
+        self.assertEqual(code, 1)
+        self.assertIn("check unit: blocked", output)
+        self.assertIn("not_started", output)
+
+    def test_a_workspace_without_a_commit_says_so(self) -> None:
+        shutil.rmtree(self.root / ".git")
+        _git(self.root, "init", "-q")
+        self.write_config([sys.executable, "-c", "pass"])
+        code, output = self.cli("check", "unit")
+        self.assertEqual(code, 1)
+        self.assertIn("check unit: inconclusive", output)
+        self.assertIn("workspace_unknown", output)
+
+    def test_every_stored_reason_has_a_sentence(self) -> None:
+        from agent_efficiency.store import VERIFICATION_REASONS
+        from agent_efficiency.verification.receipts import REASONS
+
+        self.assertEqual(set(VERIFICATION_REASONS), set(REASONS))
+
+    def test_an_older_database_gains_the_reason_column(self) -> None:
+        store = Store(self.data)
+        with store.connect() as conn:
+            conn.execute("ALTER TABLE verification_receipts DROP COLUMN reason_code")
+        self.write_config([sys.executable, "-c", "raise SystemExit(2)"])
+        code, output = self.cli("check", "unit")
+        self.assertEqual(code, 1)
+        self.assertIn("exit_nonzero", output)
+
+
+class ReceiptColumnRaceTests(unittest.TestCase):
+    def test_two_first_writers_on_an_older_database_both_record(self) -> None:
+        import sqlite3
+        import threading
+        import time as clock
+
+        from agent_efficiency import store as store_module
+
+        with tempfile.TemporaryDirectory() as temp:
+            store = Store(temp)
+            with store.connect() as conn:
+                conn.execute("ALTER TABLE verification_receipts DROP COLUMN reason_code")
+
+            class SlowConnection(sqlite3.Connection):
+                """Widen the gap between reading the columns and adding one."""
+
+                def execute(self, sql, *args):
+                    cursor = super().execute(sql, *args)
+                    if sql.startswith("PRAGMA table_info(verification_receipts)"):
+                        rows = cursor.fetchall()
+                        clock.sleep(0.3)
+                        return iter(rows)
+                    return cursor
+
+            real_connect = sqlite3.connect
+
+            def connect(*args, **kwargs):
+                return real_connect(*args, factory=SlowConnection, **kwargs)
+
+            receipt = {
+                "check_id": "unit",
+                "check_digest": "sha256:" + "0" * 64,
+                "workspace_digest": None,
+                "git_commit": None,
+                "dirty": False,
+                "started_at": "2026-09-30T00:00:00Z",
+                "finished_at": "2026-09-30T00:00:01Z",
+                "duration_ms": 1,
+                "exit_code": 1,
+                "result": "fail",
+                "runner_version": "test",
+                "schema_version": 1,
+                "reason_code": "exit_nonzero",
+            }
+            results: list[object] = []
+
+            def record() -> None:
+                try:
+                    results.append(
+                        store.record_verification_receipt(receipt, project_key="p")
+                    )
+                except Exception as exc:  # noqa: BLE001 - reported below
+                    results.append(exc)
+
+            with patch.object(store_module.sqlite3, "connect", side_effect=connect):
+                threads = [threading.Thread(target=record) for _ in range(2)]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+            self.assertTrue(all(isinstance(item, int) for item in results), results)
+            self.assertEqual(len(store.verification_receipts("p")), 2)
 
 
 if __name__ == "__main__":

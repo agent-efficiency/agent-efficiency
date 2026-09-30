@@ -21,10 +21,10 @@ from agent_efficiency.capability_validation import (
     canonical_sha256,
     read_json_object,
 )
-from agent_efficiency.paths import PLUGIN_ROOT
+from agent_efficiency.paths import bundled_file
 
 
-BUNDLED_CAPABILITY_PACK = PLUGIN_ROOT / "capabilities" / "bundled" / "base-pack.json"
+BUNDLED_CAPABILITY_PACK = bundled_file("capabilities", "base-pack.json")
 MAX_PACK_BYTES = 1_048_576
 PACK_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,95}$")
 CARD_ID = re.compile(r"^core[.][a-z0-9][a-z0-9.-]{1,94}$")

@@ -2,7 +2,9 @@
 
 No vault command touches the database, so the group is dispatched before the
 store is built. That keeps ``vault check`` usable from a git hook on a machine
-where the runtime data directory is missing or unwritable.
+where the runtime data directory is missing or unwritable. ``register`` and
+``show`` read the data folder, so they first let an older host store be
+copied into it; see ``host_data``.
 
 Exit codes:
 
@@ -23,7 +25,8 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from agent_efficiency.paths import data_dir
+from agent_efficiency import __version__
+from agent_efficiency.host_data import CopyPending, settle_data_dir
 from agent_efficiency.vault import gitcontent
 from agent_efficiency.vault.config import (
     VaultConfigError,
@@ -41,7 +44,12 @@ from agent_efficiency.vault.guards import (
     is_scannable,
     scan_secrets,
 )
-from agent_efficiency.vault.index import IndexError_, cap_overflow, write_index
+from agent_efficiency.vault.index import (
+    INDEX_JSON,
+    IndexError_,
+    cap_overflow,
+    write_index,
+)
 from agent_efficiency.vault.migrate import MigrationError, apply_proposal, propose
 from agent_efficiency.vault.prepare import prepare
 from agent_efficiency.vault.render import ALLOWANCE
@@ -74,15 +82,31 @@ VAULT_ERRORS = (
 DIRECTORIES = ("projects", "feedback", "reference", "doctrine", "sessions")
 HOOKS_DIRECTORY = ".githooks"
 
+INSTALL_COMMAND = (
+    "pipx install git+https://github.com/agent-efficiency/"
+    f"agent-efficiency@v{__version__}"
+)
+
+# The hooks are privacy guards, so they fail closed: without the command they
+# stop the commit or push, and say why and how to install it.
+REQUIRE_COMMAND = """if ! command -v agent-efficiency >/dev/null 2>&1; then
+  echo "agent-efficiency vault: this {action} was stopped because the" >&2
+  echo "agent-efficiency command is not on PATH, so the vault checks could not run." >&2
+  echo "Install the command with:" >&2
+  echo "  {install}" >&2
+  exit 1
+fi
+"""
+
 PRE_COMMIT = """#!/bin/sh
 # Installed by: agent-efficiency vault init
 # --staged checks the content of the git index, which is what this commit will
 # hold. The working copy is a different thing and is not what is being
 # committed.
 set -e
-root=$(git rev-parse --show-toplevel)
+{require}root=$(git rev-parse --show-toplevel)
 exec agent-efficiency vault check "$root" --staged
-"""
+""".format(require=REQUIRE_COMMAND.format(action="commit", install=INSTALL_COMMAND))
 
 PRE_PUSH = """#!/bin/sh
 # Installed by: agent-efficiency vault init
@@ -90,9 +114,9 @@ PRE_PUSH = """#!/bin/sh
 # being pushed on standard input. --push reads those refs and checks the
 # commits and blobs the push would send.
 set -e
-root=$(git rev-parse --show-toplevel)
+{require}root=$(git rev-parse --show-toplevel)
 exec agent-efficiency vault check "$root" --push --remote "$2"
-"""
+""".format(require=REQUIRE_COMMAND.format(action="push", install=INSTALL_COMMAND))
 
 HOOKS = (("pre-commit", PRE_COMMIT), ("pre-push", PRE_PUSH))
 
@@ -328,8 +352,30 @@ def _check_staged(root: Path) -> list[Finding]:
     """Check the content of the git index, which is what a commit will hold."""
 
     tree, repository, prefix = _repository(root)
-    items = gitcontent.staged_items(repository, prefix, keep=is_scannable)
-    return check_content(tree, items)
+    items = gitcontent.staged_items(repository, prefix, keep=_with_index)
+    notes, index = _split_index(items)
+    return check_content(
+        tree,
+        notes,
+        index=index,
+        index_remedy=(
+            f"run agent-efficiency vault index {tree.root}, then stage "
+            f"{INDEX_JSON} and INDEX.md"
+        ),
+    )
+
+
+def _with_index(relative: str) -> bool:
+    """Read what the guards check, plus the generated index they compare."""
+
+    return relative == INDEX_JSON or is_scannable(relative)
+
+
+def _split_index(
+    items: list[tuple[str, bytes]],
+) -> tuple[list[tuple[str, bytes]], bytes | None]:
+    index = next((data for path, data in items if path == INDEX_JSON), None)
+    return [item for item in items if item[0] != INDEX_JSON], index
 
 
 def _check_push(root: Path, remote_url: str | None) -> list[Finding]:
@@ -347,26 +393,44 @@ def _check_push(root: Path, remote_url: str | None) -> list[Finding]:
     refs = gitcontent.parse_refs(sys.stdin.read())
 
     findings = check_content(tree, [], remote_url=remote_url)
-    plan = gitcontent.push_plan(repository, refs, prefix, keep=is_scannable)
+    plan = gitcontent.push_plan(repository, refs, prefix, keep=_with_index)
+    # The index is read only to compare it with each tip. Its blobs are
+    # generated from notes that are checked in their own right.
+    objects = [
+        (location, data)
+        for location, data in plan.objects
+        if location.split(" (object ", 1)[0] != INDEX_JSON
+    ]
 
     carried: set[bytes] = set()
-    for _ref, items in plan.tips:
-        for _path, data in items:
+    for ref, items in plan.tips:
+        notes, index = _split_index(items)
+        for _path, data in notes:
             carried.add(hashlib.sha256(data).digest())
-        findings.extend(check_content(tree, items))
+        findings.extend(
+            check_content(
+                tree,
+                notes,
+                index=index,
+                index_remedy=(
+                    f"run agent-efficiency vault index {tree.root}, commit "
+                    f"{INDEX_JSON} and INDEX.md to {ref}, then push again"
+                ),
+            )
+        )
 
     findings.extend(
         check_history_classification(
             tree,
             [
                 (location, data)
-                for location, data in plan.objects
+                for location, data in objects
                 if hashlib.sha256(data).digest() not in carried
             ],
         )
     )
 
-    for location, data in plan.objects:
+    for location, data in objects:
         if hashlib.sha256(data).digest() in carried:
             continue
         try:
@@ -537,7 +601,10 @@ def _permissions(bits: int) -> int:
 
 
 def _register(args: argparse.Namespace) -> int:
-    root = data_dir(args.data_dir)
+    try:
+        root = settle_data_dir(args.data_dir)
+    except CopyPending as exc:
+        return _fail(str(exc))
     try:
         stale = stale_entries(root)
         tree = register_tree(root, Path(args.root))
@@ -551,7 +618,10 @@ def _register(args: argparse.Namespace) -> int:
 
 def _show(args: argparse.Namespace) -> int:
     cwd = Path(args.cwd or os.getcwd())
-    root = data_dir(args.data_dir)
+    try:
+        root = settle_data_dir(args.data_dir)
+    except CopyPending as exc:
+        return _fail(str(exc))
     prepared = prepare(cwd, root)
     if prepared.status != "ready":
         print(f"No vault context: {prepared.status} ({prepared.reason}).")

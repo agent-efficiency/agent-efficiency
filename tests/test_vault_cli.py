@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import stat
 import tempfile
 import unittest
@@ -101,6 +102,56 @@ class VaultInitTests(unittest.TestCase):
             push = (hooks / "pre-push").read_text(encoding="utf-8")
             self.assertIn("vault check", push)
             self.assertIn("--remote", push)
+
+    def run_hook_without_the_command(self, root: Path, name: str):
+        import subprocess
+
+        from vault_fixtures import git
+
+        git(root, "init", "-q", "-b", "main")
+        bare = Path(root).parent / "bin"
+        bare.mkdir()
+        for tool in ("git", "sh", "dirname"):
+            found = shutil.which(tool)
+            if found:
+                (bare / tool).symlink_to(found)
+        return subprocess.run(
+            [str(root / ".githooks" / name), "origin", "git@example.invalid:x.git"],
+            cwd=root,
+            env={"PATH": str(bare), "HOME": str(root.parent)},
+            input="",
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_hooks_stop_with_install_advice_when_the_command_is_missing(self) -> None:
+        from agent_efficiency import __version__
+
+        install = (
+            "pipx install git+https://github.com/agent-efficiency/"
+            f"agent-efficiency@v{__version__}"
+        )
+        for name, action in (("pre-commit", "commit"), ("pre-push", "push")):
+            with self.subTest(hook=name), tempfile.TemporaryDirectory() as raw:
+                root = Path(raw) / "vault-core"
+                run(["vault", "init", str(root), "--classification", "core"])
+                result = self.run_hook_without_the_command(root, name)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f"this {action} was stopped", result.stderr)
+                self.assertIn("agent-efficiency command", result.stderr)
+                self.assertIn(install, result.stderr)
+                self.assertNotIn("not found", result.stderr)
+
+    def test_init_on_an_existing_tree_updates_the_hooks(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw) / "vault-core"
+            run(["vault", "init", str(root), "--classification", "core"])
+            hook = root / ".githooks" / "pre-commit"
+            hook.write_text("#!/bin/sh\nexec agent-efficiency old\n", encoding="utf-8")
+            code, _ = run(["vault", "init", str(root), "--classification", "core"])
+            self.assertEqual(code, 0)
+            self.assertIn("pipx install", hook.read_text(encoding="utf-8"))
 
     def test_hooks_check_git_content_rather_than_the_working_copy(self) -> None:
         """The flags are the difference between checking a commit and a folder."""
@@ -281,6 +332,73 @@ class VaultCheckTests(unittest.TestCase):
             payload = json.loads(output)
             self.assertFalse(payload["ok"])
             self.assertTrue(payload["error"])
+
+
+class VaultIndexCurrencyTests(unittest.TestCase):
+    """A committed index that no longer matches the notes is a finding."""
+
+    def tree(self, raw: str) -> Path:
+        root = Path(raw) / "vault-core"
+        run(["vault", "init", str(root), "--classification", "core"])
+        return root
+
+    def findings(self, argv: list[str]) -> tuple[int, list[dict]]:
+        code, output = run([*argv, "--json"])
+        return code, json.loads(output)["findings"]
+
+    def test_a_note_added_without_reindexing_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = self.tree(raw)
+            (root / "projects" / "alpha.md").write_text(note("alpha"), encoding="utf-8")
+            code, findings = self.findings(["vault", "check", str(root)])
+            self.assertEqual(code, 1)
+            self.assertEqual([item["rule"] for item in findings], ["index_stale"])
+            self.assertIn(f"agent-efficiency vault index {root}", findings[0]["remedy"])
+            self.assertEqual(run(["vault", "index", str(root)])[0], 0)
+            self.assertEqual(self.findings(["vault", "check", str(root)]), (0, []))
+
+    def test_a_missing_index_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = self.tree(raw)
+            (root / "index.json").unlink()
+            code, findings = self.findings(["vault", "check", str(root)])
+            self.assertEqual(code, 1)
+            self.assertEqual([item["rule"] for item in findings], ["index_stale"])
+            self.assertIn("missing", findings[0]["detail"])
+
+    def test_text_output_gives_the_command(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = self.tree(raw)
+            (root / "projects" / "alpha.md").write_text(note("alpha"), encoding="utf-8")
+            code, output = run(["vault", "check", str(root)])
+            self.assertEqual(code, 1)
+            self.assertIn("index_stale", output)
+            self.assertIn(f"fix: run agent-efficiency vault index {root}", output)
+
+    def test_staged_check_compares_the_staged_index(self) -> None:
+        from vault_fixtures import git
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = self.tree(raw)
+            git(root, "init", "-q", "-b", "main")
+            git(root, "add", "-A")
+            git(root, "commit", "-q", "-m", "vault")
+            (root / "projects" / "alpha.md").write_text(note("alpha"), encoding="utf-8")
+            git(root, "add", "projects/alpha.md")
+            code, findings = self.findings(["vault", "check", str(root), "--staged"])
+            self.assertEqual(code, 1)
+            self.assertEqual([item["rule"] for item in findings], ["index_stale"])
+            self.assertIn("stage", findings[0]["remedy"])
+
+            # Reindexing on disk is not enough: the commit holds the staged index.
+            run(["vault", "index", str(root)])
+            code, findings = self.findings(["vault", "check", str(root), "--staged"])
+            self.assertEqual([item["rule"] for item in findings], ["index_stale"])
+
+            git(root, "add", "index.json", "INDEX.md")
+            self.assertEqual(
+                self.findings(["vault", "check", str(root), "--staged"]), (0, [])
+            )
 
 
 class VaultIndexTests(unittest.TestCase):

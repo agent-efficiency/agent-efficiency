@@ -7,10 +7,12 @@ import fnmatch
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -26,9 +28,24 @@ from agent_efficiency.capability_retrieval import (
     explain_capability,
 )
 from agent_efficiency.hook import format_session_status
+from agent_efficiency.claude_folder import claude_paths, folder_status
+from agent_efficiency.host_data import (
+    CopyPending,
+    settle_data_dir,
+    unused_host_stores,
+)
 from agent_efficiency.models import VALID_MODES
-from agent_efficiency.paths import PLUGIN_ROOT
+from agent_efficiency.paths import (
+    PACKAGE_DIR,
+    PLUGIN_ROOT,
+    in_plugin_folder,
+    is_private,
+)
 from agent_efficiency.policy import PolicyPack
+from agent_efficiency.python_support import (
+    MINIMUM_PYTHON,
+    unsupported_python_message,
+)
 from agent_efficiency.report import (
     build_explanation,
     build_report,
@@ -53,7 +70,7 @@ from agent_efficiency.statusline import process_statusline
 from agent_efficiency.store import Store, project_identity
 from agent_efficiency.vault import cli_commands as vault_commands
 from agent_efficiency.verification.config import load_project_config
-from agent_efficiency.verification.receipts import receipt_state
+from agent_efficiency.verification.receipts import reason_text, receipt_state
 from agent_efficiency.verification.runner import run_checks
 from agent_efficiency.verification.state import workspace_state
 
@@ -144,9 +161,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = subparsers.add_parser("doctor", help="Check local installation.")
     doctor.add_argument("--json", action="store_true")
+    doctor.add_argument(
+        "--cwd",
+        help="Folder to check host enablement for. Defaults to the current folder.",
+    )
 
     smoke = subparsers.add_parser(
-        "smoke-test", help="Run fixture events through the installed hook command."
+        "smoke-test",
+        help="Run fixture events through this package's hook command.",
     )
     smoke.add_argument("host", choices=("claude", "cursor", "codex"))
     smoke.add_argument("--json", action="store_true")
@@ -289,7 +311,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         # No vault command reads the database, so dispatch before the store is
         # built. A git hook must still work when the data directory does not.
         return vault_commands.dispatch(args)
-    store = Store(args.data_dir)
+    try:
+        store = Store(settle_data_dir(args.data_dir))
+    except CopyPending as exc:
+        if args.command == "doctor":
+            folder = Path(args.cwd) if args.cwd else Path.cwd()
+            result = _doctor(None, folder, root=exc.target, copy_error=str(exc))
+            _emit(result if args.json else _format_doctor(result), args.json)
+            return 1
+        print(str(exc), file=sys.stderr)
+        return 2
     if args.command in {"on", "off", "observe", "advise", "guard", "mode"}:
         return _mode(args, store)
     if args.command == "status":
@@ -314,6 +345,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         _emit(report if args.json else format_report(report), args.json)
         return 0
     if args.command == "explain":
+        if args.session and not store.get_session(args.session):
+            result = {"ok": False, "error": f"no recorded session {args.session}"}
+            _emit(result if args.json else _format_key_values(result), args.json)
+            return 1
         explanation = build_explanation(store, session_id=args.session, cwd=Path.cwd())
         if args.rate:
             intervention = explanation.get("intervention")
@@ -330,10 +365,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             explanation = build_explanation(
                 store, session_id=args.session, cwd=Path.cwd()
             )
+        # Nothing recorded yet is an answer, not an error.
         _emit(explanation if args.json else format_explanation(explanation), args.json)
-        return 0 if explanation.get("found") else 1
+        return 0
     if args.command == "doctor":
-        result = _doctor(store)
+        result = _doctor(store, Path(args.cwd) if args.cwd else Path.cwd())
         _emit(result if args.json else _format_doctor(result), args.json)
         return 0 if result["ok"] else 1
     if args.command == "migrate":
@@ -477,7 +513,8 @@ def _statusline(args: argparse.Namespace) -> int:
         payload = json.load(sys.stdin)
         if not isinstance(payload, dict):
             raise ValueError("status input must be an object")
-        print(process_statusline(payload, Store(args.data_dir)))
+        store = Store(settle_data_dir(args.data_dir))
+        print(process_statusline(payload, store))
     except Exception:
         print("AE unavailable")
     return 0
@@ -630,6 +667,9 @@ def _check_project(args: argparse.Namespace, store: Store) -> int:
             f"Agent Efficiency check {receipt['check_id']}: "
             f"{receipt['result']} (receipt {receipt['receipt_id']})"
         )
+        reason = reason_text(receipt)
+        if reason:
+            print(f"  reason: {receipt.get('reason_code') or 'unknown'}: {reason}")
     return 0 if all(item["result"] == "pass" for item in receipts) else 1
 
 
@@ -675,6 +715,8 @@ def _evidence(args: argparse.Namespace, store: Store) -> int:
             result = {"ok": False, "error": "verification receipt not found"}
             _emit(result if args.json else result["error"], args.json)
             return 1
+        receipt["reason_code"] = receipt.get("reason_code")
+        receipt["reason"] = reason_text(receipt)
         _emit(receipt if args.json else _format_key_values(receipt), args.json)
         return 0
     try:
@@ -707,11 +749,34 @@ def _evidence(args: argparse.Namespace, store: Store) -> int:
 def _format_evidence(values: list[dict[str, Any]]) -> str:
     if not values:
         return "No verification checks are configured."
-    return "\n".join(f"{value['check_id']}: {value['state']}" for value in values)
+    lines = []
+    for value in values:
+        line = f"{value['check_id']}: {value['state']}"
+        receipt = value["receipt"]
+        if receipt and value["state"] == receipt.get("result"):
+            reason = reason_text(receipt)
+            if reason:
+                line = f"{line}: {reason}"
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def _smoke_test(args: argparse.Namespace) -> int:
-    script = PLUGIN_ROOT / "scripts" / "agent_efficiency_hook.py"
+    if in_plugin_folder(PLUGIN_ROOT):
+        # The same command the hosts run: the plugin's hook script, without
+        # the site directory.
+        root = PLUGIN_ROOT
+        command = [sys.executable, "-S", str(root / "scripts" / "agent_efficiency_hook.py")]
+        described = str(command[-1])
+    else:
+        # An installed package has no plugin folder and no hook script. Its
+        # hook entry point runs the same dispatcher.
+        root = PACKAGE_DIR
+        command = [sys.executable, "-m", "agent_efficiency.hook_entry"]
+        described = (
+            "python -m agent_efficiency.hook_entry (this installed package has "
+            "no plugin folder)"
+        )
     with tempfile.TemporaryDirectory() as temporary:
         environment = dict(os.environ)
         environment["AGENT_EFFICIENCY_DATA"] = str(Path(temporary) / "data")
@@ -723,11 +788,11 @@ def _smoke_test(args: argparse.Namespace) -> int:
         ):
             environment.pop(key, None)
         if args.host == "claude":
-            environment["CLAUDE_PLUGIN_ROOT"] = str(PLUGIN_ROOT)
+            environment["CLAUDE_PLUGIN_ROOT"] = str(root)
             identity = {"session_id": "smoke-claude"}
             events = ("SessionStart", "UserPromptSubmit")
         elif args.host == "codex":
-            environment["PLUGIN_ROOT"] = str(PLUGIN_ROOT)
+            environment["PLUGIN_ROOT"] = str(root)
             identity = {"session_id": "smoke-codex"}
             events = ("SessionStart", "UserPromptSubmit")
         else:
@@ -739,12 +804,12 @@ def _smoke_test(args: argparse.Namespace) -> int:
             events = ("sessionStart", "beforeSubmitPrompt")
         base = {**identity, "cwd": temporary}
         started = _run_smoke_event(
-            script,
+            command,
             {**base, "hook_event_name": events[0]},
             environment,
         )
         status = _run_smoke_event(
-            script,
+            command,
             {
                 **base,
                 "hook_event_name": events[1],
@@ -759,7 +824,13 @@ def _smoke_test(args: argparse.Namespace) -> int:
     result = {
         "ok": started[0] == 0 and status.get("returncode") == 0 and shape_valid,
         "host": args.host,
-        "installed_command": str(script),
+        # The hook command of the package this command runs from. It is not
+        # necessarily the copy a host installed; doctor checks that copy.
+        "command_under_test": described,
+        "installed_copy": (
+            "not tested here; run agent-efficiency doctor to check the copy "
+            "each host installed"
+        ),
         "session_event_exit": started[0],
         "native_response_shape_valid": shape_valid,
     }
@@ -768,12 +839,12 @@ def _smoke_test(args: argparse.Namespace) -> int:
 
 
 def _run_smoke_event(
-    script: Path,
+    command: list[str],
     payload: dict[str, Any],
     environment: dict[str, str],
 ) -> tuple[int, dict[str, Any]] | dict[str, Any]:
     completed = subprocess.run(
-        [sys.executable, "-S", str(script)],
+        command,
         input=json.dumps(payload),
         text=True,
         capture_output=True,
@@ -809,61 +880,231 @@ def _migrate(args: argparse.Namespace, store: Store) -> int:
     return 0 if result["supported"] else 1
 
 
-def _host_package_status() -> dict[str, dict[str, Any]]:
-    specs = {
-        "claude": (
-            PLUGIN_ROOT / ".claude-plugin" / "plugin.json",
-            PLUGIN_ROOT / "hooks" / "claude-hooks.json",
-            CLAUDE_EVENTS,
-            "${CLAUDE_PLUGIN_ROOT}",
-        ),
-        "cursor": (
-            PLUGIN_ROOT / ".cursor-plugin" / "plugin.json",
-            PLUGIN_ROOT / "hooks" / "cursor-hooks.json",
-            CURSOR_EVENTS,
-            "${CURSOR_PLUGIN_ROOT}",
-        ),
-        "codex": (
-            PLUGIN_ROOT / ".codex-plugin" / "plugin.json",
-            PLUGIN_ROOT / "hooks" / "codex-hooks.json",
-            CODEX_EVENTS,
-            "${PLUGIN_ROOT}",
-        ),
+HOST_SPECS = {
+    "claude": (CLAUDE_EVENTS, "${CLAUDE_PLUGIN_ROOT}"),
+    "cursor": (CURSOR_EVENTS, "${CURSOR_PLUGIN_ROOT}"),
+    "codex": (CODEX_EVENTS, "${PLUGIN_ROOT}"),
+}
+HOST_NAMES = {"claude": "Claude Code", "codex": "Codex", "cursor": "Cursor"}
+PLUGIN_ID_PREFIX = "agent-efficiency@"
+ALL_EFFECT_CAPABILITIES = {
+    "add_context",
+    "notify",
+    "deny_action",
+    "continue_turn",
+    "replace_action",
+}
+
+
+def _plugin_folder_status(
+    root: Path, host: str, *, probe: bool = False
+) -> dict[str, Any]:
+    """Check one plugin folder as ``host`` loads it.
+
+    With ``probe``, a folder that passes the file checks also has its hook
+    command started once, the way the host starts it.
+    """
+
+    expected_events, root_variable = HOST_SPECS[host]
+    manifest_path = root / f".{host}-plugin" / "plugin.json"
+    expected_hooks = f"./hooks/{host}-hooks.json"
+    hooks_path = root / "hooks" / f"{host}-hooks.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        # The manifest must name this host's hook file. Without it, a host
+        # falls back to the default hooks/hooks.json, which is not shipped.
+        manifest_ready = (
+            manifest.get("name") == "agent-efficiency"
+            and manifest.get("hooks") == expected_hooks
+        )
+        version = manifest.get("version")
+    except (OSError, ValueError, AttributeError):
+        manifest_ready = False
+        version = None
+    try:
+        document = json.loads(hooks_path.read_text(encoding="utf-8"))
+        hooks = document.get("hooks")
+        event_names = set(hooks) if isinstance(hooks, dict) else set()
+        commands = hooks.values() if isinstance(hooks, dict) else ()
+        command_text = json.dumps(list(commands))
+        hooks_ready = event_names == expected_events and root_variable in command_text
+        referenced = _hook_command_paths(hooks, root_variable)
+        first_command = _first_hook_command(hooks)
+    except (OSError, ValueError, AttributeError):
+        event_names = set()
+        hooks_ready = False
+        referenced = set()
+        first_command = None
+    not_ready_reasons: list[str] = []
+    if not root.is_dir():
+        not_ready_reasons.append(f"the plugin folder {root} does not exist")
+    else:
+        if not manifest_ready:
+            not_ready_reasons.append(
+                f"{manifest_path} must be named agent-efficiency and set hooks "
+                f"to {expected_hooks}"
+            )
+        if not hooks_ready:
+            not_ready_reasons.append(
+                f"{hooks_path} must list the {host} events and use {root_variable}"
+            )
+        not_ready_reasons.extend(_missing_runtime_files(root, referenced))
+        if probe and not not_ready_reasons and first_command is not None:
+            failure = _probe_hook_command(root, first_command, root_variable)
+            if failure:
+                not_ready_reasons.append(failure)
+        # Claude Code loads hooks/hooks.json in addition to the file its
+        # manifest names. A copy left over from an older release runs there
+        # with an empty plugin root and fails on every event. No release ships
+        # the file, so its presence is always stale.
+        stale = root / "hooks" / "hooks.json"
+        if stale.exists():
+            not_ready_reasons.append(
+                f"remove the stale default hook file {stale}: the host runs it "
+                "in addition to its own hook file, with an empty plugin root"
+            )
+    return {
+        "version": version,
+        "manifest_ready": manifest_ready,
+        "hooks_ready": hooks_ready,
+        "event_count": len(event_names),
+        "ready": not not_ready_reasons,
+        "not_ready_reasons": not_ready_reasons,
     }
-    # Claude Code loads hooks/hooks.json in addition to the file its manifest
-    # names. A copy left over from an older release runs there with an empty
-    # plugin root and fails on every event.
-    stale_default_hooks = PLUGIN_ROOT / "hooks" / "hooks.json"
+
+
+# Files every hook command needs besides the script it names: the package the
+# script loads. Every release so far has shipped these two.
+HOOK_RUNTIME_FILES = (
+    "src/agent_efficiency/__init__.py",
+    "src/agent_efficiency/hook.py",
+)
+
+
+def _hook_command_paths(hooks: dict[str, Any], root_variable: str) -> set[str]:
+    """Return the paths below the plugin root that the hook commands name."""
+
+    pattern = re.compile(re.escape(root_variable) + r"/([^\"'\s]+)")
+    found: set[str] = set()
+    for groups in hooks.values():
+        for group in groups if isinstance(groups, list) else []:
+            if not isinstance(group, dict):
+                continue
+            # Claude Code and Codex nest commands under "hooks"; Cursor lists
+            # them directly.
+            entries = group.get("hooks", [group])
+            for entry in entries if isinstance(entries, list) else []:
+                command = entry.get("command") if isinstance(entry, dict) else None
+                if isinstance(command, str):
+                    found.update(pattern.findall(command))
+    return found
+
+
+def _first_hook_command(hooks: dict[str, Any]) -> str | None:
+    for groups in hooks.values():
+        for group in groups if isinstance(groups, list) else []:
+            if not isinstance(group, dict):
+                continue
+            entries = group.get("hooks", [group])
+            for entry in entries if isinstance(entries, list) else []:
+                command = entry.get("command") if isinstance(entry, dict) else None
+                if isinstance(command, str):
+                    return command
+    return None
+
+
+def _probe_hook_command(root: Path, command: str, root_variable: str) -> str | None:
+    """Start an installed copy's hook command once and report a failure.
+
+    It runs through the shell like the host runs it, with the host's root
+    variable set to the installed folder. The payload is empty, and HOME and
+    the data folder point at a temporary folder, so nothing real is read or
+    recorded. A hook that cannot import what it needs exits with an error
+    here, just as it would in a session.
+    """
+
+    if shutil.which("python3") is None:
+        # Doctor already reports a missing python3 for the hooks.
+        return None
+    variable = root_variable.strip("${}")
+    with tempfile.TemporaryDirectory() as temporary:
+        environment = {
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": temporary,
+            "LANG": os.environ.get("LANG", "C.UTF-8"),
+            "AGENT_EFFICIENCY_DATA": str(Path(temporary) / "data"),
+            variable: str(root),
+        }
+        try:
+            completed = subprocess.run(
+                command,
+                shell=True,
+                input="{}",
+                cwd=temporary,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return f"the hook command could not be started from {root}: {exc}"
+    if completed.returncode == 0:
+        return None
+    lines = (completed.stderr or completed.stdout).strip().splitlines()
+    detail = lines[-1] if lines else f"exit status {completed.returncode}"
+    return (
+        f"the hook command failed when started from {root}: {detail}; "
+        "reinstall the plugin"
+    )
+
+
+def _missing_runtime_files(root: Path, referenced: set[str]) -> list[str]:
+    """Explain each file a hook command needs that is missing from ``root``."""
+
+    reasons = []
+    if not referenced:
+        reasons.append(
+            "the hook commands name no script in the plugin folder; reinstall "
+            "the plugin"
+        )
+    resolved_root = root.resolve()
+    for relative in sorted(referenced) + list(HOOK_RUNTIME_FILES):
+        target = (root / relative).resolve()
+        if not target.is_relative_to(resolved_root):
+            reasons.append(
+                f"a hook command runs {root / relative}, which is outside the "
+                "plugin folder; reinstall the plugin"
+            )
+        elif not target.is_file():
+            reasons.append(
+                f"{root / relative} is missing, so the hooks cannot run; "
+                "reinstall the plugin"
+            )
+    return reasons
+
+
+def _host_package_status() -> dict[str, dict[str, Any]]:
+    """Check the plugin files this command runs from, for every host.
+
+    An installed wheel has no plugin folder, so there are no host files to
+    check; each host then reports ready as None rather than failing.
+    """
+
+    in_plugin = in_plugin_folder(PLUGIN_ROOT)
     result: dict[str, dict[str, Any]] = {}
-    for host, (
-        manifest_path,
-        hooks_path,
-        expected_events,
-        root_variable,
-    ) in specs.items():
-        expected_hooks = f"./{hooks_path.relative_to(PLUGIN_ROOT).as_posix()}"
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            # The manifest must name this host's hook file. Without it, a host
-            # falls back to the default hooks/hooks.json, which is not shipped.
-            manifest_ready = (
-                manifest.get("name") == "agent-efficiency"
-                and manifest.get("hooks") == expected_hooks
-            )
-        except (OSError, ValueError, json.JSONDecodeError):
-            manifest_ready = False
-        try:
-            document = json.loads(hooks_path.read_text(encoding="utf-8"))
-            hooks = document.get("hooks")
-            event_names = set(hooks) if isinstance(hooks, dict) else set()
-            commands = hooks.values() if isinstance(hooks, dict) else ()
-            command_text = json.dumps(list(commands))
-            hooks_ready = (
-                event_names == expected_events and root_variable in command_text
-            )
-        except (OSError, ValueError, json.JSONDecodeError):
-            event_names = set()
-            hooks_ready = False
+    for host in HOST_SPECS:
+        if in_plugin:
+            status = _plugin_folder_status(PLUGIN_ROOT, host)
+            status.pop("version")
+        else:
+            status = {
+                "manifest_ready": None,
+                "hooks_ready": None,
+                "event_count": 0,
+                "ready": None,
+                "not_ready_reasons": [],
+            }
         supported_capabilities = sorted(
             {
                 capability
@@ -871,45 +1112,221 @@ def _host_package_status() -> dict[str, dict[str, Any]]:
                 for capability in capabilities
             }
         )
-        all_effect_capabilities = {
-            "add_context",
-            "notify",
-            "deny_action",
-            "continue_turn",
-            "replace_action",
-        }
-        not_ready_reasons: list[str] = []
-        if not manifest_ready:
-            not_ready_reasons.append(
-                f"{manifest_path.relative_to(PLUGIN_ROOT).as_posix()} must be "
-                f"named agent-efficiency and set hooks to {expected_hooks}"
-            )
-        if not hooks_ready:
-            not_ready_reasons.append(
-                f"{expected_hooks} must list the {host} events and use {root_variable}"
-            )
-        if host == "claude" and stale_default_hooks.exists():
-            not_ready_reasons.append(
-                "remove the stale default hook file hooks/hooks.json: Claude "
-                "Code runs it in addition to its own hook file, with an empty "
-                "plugin root"
-            )
         result[host] = {
             "cli_version": _tool_version(host),
-            "manifest_ready": manifest_ready,
-            "hooks_ready": hooks_ready,
-            "event_count": len(event_names),
+            **status,
             "supported_capabilities": supported_capabilities,
             "unsupported_capabilities": sorted(
-                all_effect_capabilities - set(supported_capabilities)
+                ALL_EFFECT_CAPABILITIES - set(supported_capabilities)
             ),
-            "ready": not not_ready_reasons,
-            "not_ready_reasons": not_ready_reasons,
         }
     return result
 
 
-def _doctor(store: Store) -> dict[str, Any]:
+def _installed_host_status(folder: Path) -> dict[str, dict[str, Any]]:
+    """Check the plugin each host actually installed, not this package."""
+
+    home = Path.home()
+    claude = _claude_installs(
+        Path(os.environ.get("CLAUDE_CONFIG_DIR") or home / ".claude")
+    )
+    if claude["installs"]:
+        user_settings, trust_file = claude_paths(os.environ, home)
+        here = folder_status(
+            folder,
+            claude["installs"],
+            user_settings=user_settings,
+            trust_file=trust_file,
+            home=home,
+        )
+        claude["this_folder"] = here
+        # Only the install used here and the user install, which every
+        # folder falls back to, decide readiness. A broken install made for
+        # another folder is shown as a warning.
+        warnings: list[str] = []
+        ready = bool(here["ready"])
+        for index, install in enumerate(claude["installs"]):
+            install["applies_here"] = index == here["install_index"]
+            if install["ready"]:
+                continue
+            if install["applies_here"] or install["scope"] == "user":
+                ready = False
+            else:
+                where = install.get("project") or install["path"]
+                warnings.extend(
+                    f"{install['scope']} install for {where}: {reason}"
+                    for reason in install["not_ready_reasons"]
+                )
+        claude["ready"] = ready
+        claude["status"] = "ready" if ready else "not ready"
+        claude["warnings"] = warnings
+    return {
+        "claude": claude,
+        "codex": _codex_installs(Path(os.environ.get("CODEX_HOME") or home / ".codex")),
+        "cursor": _cursor_installs(home / ".cursor"),
+    }
+
+
+def _claude_installs(config: Path) -> dict[str, Any]:
+    record_path = config / "plugins" / "installed_plugins.json"
+    installs: list[dict[str, Any]] = []
+    # Records often share one installed folder; check and start it once.
+    probed: dict[str, dict[str, Any]] = {}
+    try:
+        document = json.loads(record_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return _host_summary(installs)
+    except (OSError, ValueError) as exc:
+        return _host_summary(
+            installs, error=f"{record_path} could not be read: {exc}"
+        )
+    plugins = document.get("plugins") if isinstance(document, dict) else None
+    for plugin_id, records in (plugins or {}).items():
+        if not str(plugin_id).startswith(PLUGIN_ID_PREFIX):
+            continue
+        for record in records if isinstance(records, list) else [records]:
+            if not isinstance(record, dict):
+                continue
+            path = Path(str(record.get("installPath") or ""))
+            key = str(path)
+            if key not in probed:
+                probed[key] = _plugin_folder_status(path, "claude", probe=True)
+            status = probed[key]
+            install = {
+                "plugin": plugin_id,
+                "scope": record.get("scope") or "user",
+                "path": str(path),
+                "version": record.get("version") or status["version"],
+                "ready": status["ready"],
+                "not_ready_reasons": status["not_ready_reasons"],
+            }
+            if record.get("projectPath"):
+                install["project"] = str(record["projectPath"])
+            installs.append(install)
+    return _host_summary(installs)
+
+
+def _codex_installs(codex_home: Path) -> dict[str, Any]:
+    """Codex records an enabled plugin in config.toml and caches its files.
+
+    The cache holds one folder per installed version. The newest folder is the
+    one Codex loads, so that is the one checked.
+    """
+
+    config_path = codex_home / "config.toml"
+    try:
+        config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return _host_summary([])
+    except (OSError, ValueError) as exc:
+        return _host_summary([], error=f"{config_path} could not be read: {exc}")
+    plugins = config.get("plugins")
+    installs: list[dict[str, Any]] = []
+    disabled = False
+    for plugin_id, settings in (plugins if isinstance(plugins, dict) else {}).items():
+        if not str(plugin_id).startswith(PLUGIN_ID_PREFIX):
+            continue
+        if isinstance(settings, dict) and settings.get("enabled") is False:
+            disabled = True
+            continue
+        name, _, marketplace = str(plugin_id).partition("@")
+        cache = codex_home / "plugins" / "cache" / marketplace / name
+        try:
+            versions = [path for path in cache.iterdir() if path.is_dir()]
+        except OSError:
+            versions = []
+        if not versions:
+            installs.append(
+                {
+                    "plugin": plugin_id,
+                    "scope": "user",
+                    "path": str(cache),
+                    "version": None,
+                    "ready": False,
+                    "not_ready_reasons": [
+                        f"Codex lists {plugin_id} as enabled, but {cache} holds "
+                        "no installed copy; reinstall the plugin"
+                    ],
+                }
+            )
+            continue
+        active = max(versions, key=lambda path: path.stat().st_mtime)
+        status = _plugin_folder_status(active, "codex", probe=True)
+        installs.append(
+            {
+                "plugin": plugin_id,
+                "scope": "user",
+                "path": str(active),
+                "version": status["version"] or active.name,
+                "ready": status["ready"],
+                "not_ready_reasons": status["not_ready_reasons"],
+            }
+        )
+    summary = _host_summary(installs)
+    if disabled and not installs:
+        summary.update(installed=True, status="disabled")
+    return summary
+
+
+def _cursor_installs(cursor_home: Path) -> dict[str, Any]:
+    local = cursor_home / "plugins" / "local" / "agent-efficiency"
+    if not local.exists() and not local.is_symlink():
+        return _host_summary([])
+    status = _plugin_folder_status(local, "cursor", probe=True)
+    return _host_summary(
+        [
+            {
+                "plugin": "agent-efficiency (local)",
+                "scope": "user",
+                "path": str(local),
+                "version": status["version"],
+                "ready": status["ready"],
+                "not_ready_reasons": status["not_ready_reasons"],
+            }
+        ]
+    )
+
+
+def _host_summary(
+    installs: list[dict[str, Any]], *, error: str | None = None
+) -> dict[str, Any]:
+    if error:
+        return {
+            "installed": True,
+            "ready": False,
+            "status": "install record unreadable",
+            "installs": [],
+            "error": error,
+        }
+    if not installs:
+        return {
+            "installed": False,
+            "ready": None,
+            "status": "not installed",
+            "installs": [],
+        }
+    ready = all(install["ready"] for install in installs)
+    return {
+        "installed": True,
+        "ready": ready,
+        "status": "ready" if ready else "not ready",
+        "installs": installs,
+    }
+
+
+def _doctor(
+    store: Store | None,
+    folder: Path | None = None,
+    *,
+    root: Path | None = None,
+    copy_error: str | None = None,
+) -> dict[str, Any]:
+    """Check the installation. ``store`` is None while an old store waits to
+    be copied; doctor then reports why and creates nothing."""
+
+    root = store.paths.root if store is not None else root
+    assert root is not None
+    database = root / "agent-efficiency.db"
     try:
         capability_pack = load_bundled_capability_pack()
         capability_pack_policies(capability_pack)
@@ -928,16 +1345,61 @@ def _doctor(store: Store) -> dict[str, Any]:
         embedded_capability_pack_digest = None
 
     hosts = _host_package_status()
+    installed = _installed_host_status(folder or Path.cwd())
+    minimum_python = ".".join(str(part) for part in MINIMUM_PYTHON)
+    hook_path, hook_version = _hook_python()
+    # Hooks run python3 from PATH. One that is missing or does not answer is
+    # a failure, not a pass: the hooks cannot run with it.
+    hook_python_supported = hook_version is not None and (
+        unsupported_python_message(
+            tuple(int(part) for part in hook_version.split(".")[:3])
+        )
+        is None
+    )
+    if hook_path is None:
+        hook_python = (
+            "python3 is not on PATH here, so hooks cannot run; hooks run python3 "
+            f"from the host's PATH and need Python {minimum_python} or newer"
+        )
+    elif hook_version is None:
+        hook_python = (
+            f"{hook_path} did not report its version, so hooks may not run; "
+            f"they need Python {minimum_python} or newer"
+        )
+    elif hook_python_supported:
+        hook_python = f"{hook_path} is Python {hook_version}, supported"
+    else:
+        hook_python = (
+            f"{hook_path} is Python {hook_version}; hooks need Python "
+            f"{minimum_python} or newer. Put a newer python3 on PATH."
+        )
+    data_dir_private = is_private(root) and is_private(database)
     checks: dict[str, Any] = {
         "runtime_version": __version__,
         "python": platform.python_version(),
-        "python_supported": sys.version_info >= (3, 11),
-        "data_dir": str(store.paths.root),
-        "data_dir_writable": os.access(store.paths.root, os.W_OK),
-        "database": str(store.paths.database),
-        "database_ready": store.paths.database.is_file(),
-        "default_mode": store.default_mode(),
-        "active_policy_count": len(PolicyPack.load(store.paths.root).ids()),
+        "python_minimum": minimum_python,
+        "python_supported": unsupported_python_message(sys.version_info) is None,
+        "hook_python": hook_python,
+        "data_dir": str(root),
+        "data_dir_writable": os.access(root, os.W_OK),
+        "data_dir_private": data_dir_private,
+        "data_dir_permissions": (
+            "only you can read the data folder"
+            if data_dir_private
+            else (
+                "other users can read the data folder. Agent Efficiency does "
+                "not change the mode of a folder it did not create. To make it "
+                f"private, run: chmod -R go-rwx {root}"
+            )
+        ),
+        "data_copy": copy_error,
+        "unused_data_dirs": unused_host_stores(
+            root, os.environ, copy_error=copy_error
+        ),
+        "database": str(database),
+        "database_ready": database.is_file(),
+        "default_mode": store.default_mode() if store is not None else None,
+        "active_policy_count": len(PolicyPack.load(root).ids()),
         "embedded_capability_pack_ready": embedded_capability_pack_ready,
         "embedded_capability_pack_error": embedded_capability_pack_error,
         "embedded_capability_pack_id": embedded_capability_pack_id,
@@ -947,22 +1409,63 @@ def _doctor(store: Store) -> dict[str, Any]:
         "claude": hosts["claude"]["cli_version"],
         "cursor": hosts["cursor"]["cli_version"],
         "codex": hosts["codex"]["cli_version"],
+        "package_root": str(PLUGIN_ROOT) if in_plugin_folder(PLUGIN_ROOT) else None,
         "hosts": hosts,
-        "host_packages_ready": all(host["ready"] for host in hosts.values()),
+        "host_packages_ready": (
+            all(host["ready"] for host in hosts.values())
+            if in_plugin_folder(PLUGIN_ROOT)
+            else None
+        ),
+        "installed_hosts": installed,
+        "installed_hosts_ready": all(
+            host["ready"] is not False for host in installed.values()
+        ),
         "fetch_observation_limit": (
             "an observed fetch does not prove remote freshness"
         ),
         "privacy": "prompt bodies, raw commands, code, outputs, and transcripts are not stored",
     }
+    checks["hook_python_supported"] = hook_python_supported
     checks["ok"] = bool(
         checks["python_supported"]
+        and checks["hook_python_supported"]
         and checks["data_dir_writable"]
         and checks["database_ready"]
         and checks["active_policy_count"]
         and checks["embedded_capability_pack_ready"]
-        and checks["host_packages_ready"]
+        and checks["host_packages_ready"] is not False
+        and checks["installed_hosts_ready"]
     )
     return checks
+
+
+def _hook_python() -> tuple[str | None, str | None]:
+    """Return the python3 that hooks would find on this PATH, and its version."""
+
+    executable = shutil.which("python3")
+    if not executable:
+        return None, None
+    try:
+        completed = subprocess.run(
+            [
+                executable,
+                "-S",
+                "-c",
+                "import sys; print('.'.join(map(str, sys.version_info[:3])))",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return executable, None
+    version = completed.stdout.strip()
+    if completed.returncode != 0 or not all(
+        part.isdigit() for part in version.split(".")
+    ):
+        return executable, None
+    return executable, version
 
 
 def _tool_version(command: str) -> str | None:
@@ -983,37 +1486,124 @@ def _tool_version(command: str) -> str | None:
     return output[0] if output else None
 
 
+# The keys the text form of doctor prints, in order. Every key here must be one
+# that _doctor returns; a test holds that true.
+DOCTOR_TEXT_KEYS = (
+    "runtime_version",
+    "python",
+    "python_minimum",
+    "hook_python",
+    "data_dir",
+    "data_dir_permissions",
+    "data_copy",
+    "unused_data_dirs",
+    "database",
+    "default_mode",
+    "active_policy_count",
+    "embedded_capability_pack_ready",
+    "embedded_capability_pack_id",
+    "embedded_capability_pack_sequence",
+    "embedded_capability_pack_card_count",
+    "embedded_capability_pack_digest",
+    "claude",
+    "cursor",
+    "codex",
+    "hosts",
+    "installed_hosts",
+    "fetch_observation_limit",
+    "privacy",
+)
+
+
 def _format_doctor(result: dict[str, Any]) -> str:
     lines = [f"Agent Efficiency doctor: {'OK' if result['ok'] else 'FAILED'}"]
-    for key in (
-        "runtime_version",
-        "python",
-        "data_dir",
-        "database",
-        "default_mode",
-        "active_policy_count",
-        "embedded_capability_pack_ready",
-        "embedded_capability_pack_id",
-        "embedded_capability_pack_sequence",
-        "embedded_capability_pack_card_count",
-        "embedded_capability_pack_digest",
-        "installation_capability_pack_id",
-        "installation_capability_pack_sequence",
-        "installation_capability_pack_digest",
-        "foreground_upgrade_available",
-        "automatic_upgrade_available",
-        "automatic_upgrade_reason",
-        "last_upgrade_error_class",
-        "claude",
-        "cursor",
-        "codex",
-        "host_packages_ready",
-        "hosts",
-        "fetch_observation_limit",
-        "privacy",
-    ):
-        lines.append(f"{key}: {result[key]}")
+    for key in DOCTOR_TEXT_KEYS:
+        if key not in result:
+            continue
+        value = result[key]
+        if key == "hosts":
+            lines.extend(_format_package(result.get("package_root"), value))
+        elif key == "installed_hosts":
+            lines.extend(_format_installed(value))
+        elif key == "unused_data_dirs":
+            if not value:
+                lines.append(f"{key}: none")
+            else:
+                lines.append(f"{key}:")
+                for item in value:
+                    lines.append(f"  {item['path']}: {item['status']}")
+                    if item.get("recovery"):
+                        lines.append(f"    to copy it: {item['recovery']}")
+        else:
+            lines.append(f"{key}: {value}")
     return "\n".join(lines)
+
+
+def _format_package(root: Any, hosts: dict[str, Any]) -> list[str]:
+    if root is None:
+        return [
+            "Package files: none here. This is an installed Python package "
+            "with no plugin folder, so there are no host files to check; the "
+            "copy each host installed is checked below."
+        ]
+    ready = all(host["ready"] for host in hosts.values())
+    lines = [f"Package files at {root}: {'ready' if ready else 'not ready'}"]
+    for host, status in hosts.items():
+        lines.extend(
+            f"  {HOST_NAMES[host]}: {reason}" for reason in status["not_ready_reasons"]
+        )
+    return lines
+
+
+def _format_installed(installed: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
+    for host, summary in installed.items():
+        name = HOST_NAMES[host]
+        if summary.get("error"):
+            lines.append(f"{name}: {summary['status']}: {summary['error']}")
+            continue
+        if not summary["installs"]:
+            lines.append(f"{name}: {summary['status']}")
+            continue
+        for install in summary["installs"]:
+            state = "ready" if install["ready"] else "not ready"
+            lines.append(
+                f"{name}: {state}, {install['version']} "
+                f"({install['scope']} scope) at {install['path']}"
+            )
+            label = (
+                "warning"
+                if install.get("applies_here") is False
+                and install["scope"] != "user"
+                else "fix"
+            )
+            lines.extend(
+                f"  {label}: {reason}" for reason in install["not_ready_reasons"]
+            )
+        here = summary.get("this_folder")
+        if here:
+            lines.extend(_format_folder(name, here))
+    return lines
+
+
+def _format_folder(name: str, here: dict[str, Any]) -> list[str]:
+    trust = (
+        "workspace trust is saved"
+        if here["trusted"]
+        else "workspace trust is not saved, so Claude Code ignores this folder's "
+        "permission rules, but not its plugin settings"
+    )
+    if here["ready"]:
+        return [
+            f"{name} in {here['folder']}: enabled by {here['decided_by']}, "
+            f"{here['scope']} scope install; {trust}",
+            f"  note: {here['not_checked']}",
+        ]
+    return [
+        f"{name} in {here['folder']}: {here['status']}: {here['reason']}",
+        *(f"  fix: {fix}" for fix in here["fixes"]),
+        f"  note: {here['not_checked']}",
+    ]
 
 
 def _format_key_values(value: dict[str, Any]) -> str:

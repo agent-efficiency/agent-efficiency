@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,7 +17,10 @@ from agent_efficiency.statusline import process_statusline
 from agent_efficiency.store import Store
 from scripts import validate_distribution as validation
 from scripts.validate_distribution import validate_distribution
+from tests.test_doctor import isolated_home
 
+FORBIDDEN_TERM = " ".join(("personal", "project"))
+HOME_PATH = "/".join(("", "home", "someone", ""))
 HOST_HOOK_FILES = {
     "claude": "./hooks/claude-hooks.json",
     "codex": "./hooks/codex-hooks.json",
@@ -95,6 +99,73 @@ class DistributionValidationTests(unittest.TestCase):
             r"^sha256:[0-9a-f]{64}$",
         )
 
+    @staticmethod
+    def _source_copy(temp: str) -> Path:
+        root = Path(temp) / "checkout"
+        shutil.copytree(
+            validation.ROOT,
+            root,
+            ignore=shutil.ignore_patterns(
+                ".git",
+                ".venv",
+                "venv",
+                "__pycache__",
+                "*.pyc",
+                "*.egg-info",
+                "build",
+                "dist",
+            ),
+        )
+        return root
+
+    @staticmethod
+    def _add_virtual_environment(root: Path) -> None:
+        site = root / ".venv" / "lib" / "python3" / "site-packages" / "example"
+        site.mkdir(parents=True)
+        # Built from parts so this file does not trip the check it tests.
+        (site / "notes.md").write_text(
+            f"A {FORBIDDEN_TERM} installed at {HOME_PATH}tools.\n",
+            encoding="utf-8",
+        )
+
+    def _validate_copy(self, root: Path) -> dict:
+        with mock.patch.object(
+            validation, "PLUGIN", root / "plugins" / "agent-efficiency"
+        ):
+            return validate_distribution(root)
+
+    def test_validation_ignores_untracked_virtual_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = self._source_copy(temp)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+            self._add_virtual_environment(root)
+            result = self._validate_copy(root)
+        self.assertTrue(result["ok"], result["errors"])
+        self.assertEqual(result["forbidden_references"], [])
+
+    def test_validation_skips_virtual_environment_outside_git(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = self._source_copy(temp)
+            self._add_virtual_environment(root)
+            result = self._validate_copy(root)
+        self.assertTrue(result["ok"], result["errors"])
+        self.assertEqual(result["forbidden_references"], [])
+
+    def test_validation_still_reports_tracked_references(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = self._source_copy(temp)
+            (root / "docs" / "extra.md").write_text(
+                f"Written as a {FORBIDDEN_TERM}.\n", encoding="utf-8"
+            )
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+            result = self._validate_copy(root)
+        self.assertFalse(result["ok"])
+        self.assertIn(
+            f"docs/extra.md: {FORBIDDEN_TERM}", result["forbidden_references"]
+        )
+
     def test_runtime_cli_excludes_maintainer_commands(self) -> None:
         with (
             self.assertRaises(SystemExit),
@@ -136,9 +207,21 @@ class DistributionValidationTests(unittest.TestCase):
             self.assertTrue(result["ok"])
             self.assertTrue(result["native_response_shape_valid"])
 
+    def test_smoke_test_names_the_command_it_ran(self) -> None:
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(main(["smoke-test", "claude", "--json"]), 0)
+        result = json.loads(output.getvalue())
+        self.assertNotIn("installed_command", result)
+        self.assertEqual(
+            result["command_under_test"],
+            str(PLUGIN_ROOT / "scripts" / "agent_efficiency_hook.py"),
+        )
+        self.assertIn("doctor", result["installed_copy"])
+
     def test_doctor_reports_verified_first_party_pack(self) -> None:
         with (
             tempfile.TemporaryDirectory() as temp,
+            isolated_home(temp),
             contextlib.redirect_stdout(io.StringIO()) as output,
         ):
             self.assertEqual(
@@ -146,7 +229,7 @@ class DistributionValidationTests(unittest.TestCase):
                 0,
             )
         doctor = json.loads(output.getvalue())
-        self.assertEqual(doctor["runtime_version"], "0.2.0")
+        self.assertEqual(doctor["runtime_version"], "0.2.1")
         self.assertIn("does not prove", doctor["fetch_observation_limit"])
         self.assertTrue(doctor["embedded_capability_pack_ready"])
         self.assertEqual(
@@ -159,6 +242,7 @@ class DistributionValidationTests(unittest.TestCase):
     def test_doctor_reports_all_native_host_packages(self) -> None:
         with (
             tempfile.TemporaryDirectory() as temp,
+            isolated_home(temp),
             contextlib.redirect_stdout(io.StringIO()) as output,
         ):
             self.assertEqual(
@@ -304,6 +388,7 @@ class HostHookFileTests(unittest.TestCase):
             )
             with (
                 mock.patch.object(runtime_cli, "PLUGIN_ROOT", plugin),
+                isolated_home(temp),
                 contextlib.redirect_stdout(io.StringIO()) as output,
             ):
                 main(["--data-dir", temp, "doctor", "--json"])
