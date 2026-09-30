@@ -214,8 +214,9 @@ agent-efficiency smoke-test codex
 
 `doctor` checks the package files it runs from and the copy each host
 installed: Claude Code and Codex from their install records, and Cursor from
-its local plugin folder. A host that is not installed is reported as not
-installed, which is not a failure. For Claude Code it also works out which
+its local plugin folder. It starts each installed copy's hook command once,
+with an empty event and a temporary data folder, to prove it can run. A host
+that is not installed is reported as not installed, which is not a failure. For Claude Code it also works out which
 install applies in the current folder (or the one `--cwd` names) and whether
 settings enable it there; an install that is disabled or not enabled in that
 folder fails the check, with the command that fixes it. It also checks hook

@@ -288,6 +288,36 @@ class InstalledHostTests(unittest.TestCase):
                     str(installed / missing), " ".join(install["not_ready_reasons"])
                 )
 
+    def test_an_install_whose_hook_cannot_start_fails(self) -> None:
+        for missing in (
+            "src/agent_efficiency/hook_entry.py",
+            "src/agent_efficiency/python_support.py",
+        ):
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as temp:
+                home = Path(temp)
+                installed = plugin_copy(home / "cache" / "0.2.1")
+                (installed / missing).unlink()
+                claude_install(home, [claude_record(installed)])
+                code, doctor = self.doctor(home)
+                self.assertEqual(code, 1)
+                install = doctor["installed_hosts"]["claude"]["installs"][0]
+                self.assertFalse(install["ready"])
+                reasons = " ".join(install["not_ready_reasons"])
+                self.assertIn("hook command failed", reasons)
+                self.assertIn("ModuleNotFoundError", reasons)
+
+    def test_a_working_install_starts_its_hook_without_touching_real_data(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp)
+            installed = plugin_copy(home / "cache" / "0.2.1")
+            claude_install(home, [claude_record(installed)])
+            code, doctor = self.doctor(home)
+            self.assertEqual(code, 0)
+            self.assertTrue(doctor["installed_hosts"]["claude"]["ready"])
+            self.assertFalse((home / ".local" / "share" / "agent-efficiency").exists())
+
     def test_a_cursor_install_missing_its_hook_script_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             home = Path(temp)

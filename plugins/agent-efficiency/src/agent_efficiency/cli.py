@@ -896,8 +896,14 @@ ALL_EFFECT_CAPABILITIES = {
 }
 
 
-def _plugin_folder_status(root: Path, host: str) -> dict[str, Any]:
-    """Check one plugin folder as ``host`` loads it."""
+def _plugin_folder_status(
+    root: Path, host: str, *, probe: bool = False
+) -> dict[str, Any]:
+    """Check one plugin folder as ``host`` loads it.
+
+    With ``probe``, a folder that passes the file checks also has its hook
+    command started once, the way the host starts it.
+    """
 
     expected_events, root_variable = HOST_SPECS[host]
     manifest_path = root / f".{host}-plugin" / "plugin.json"
@@ -923,10 +929,12 @@ def _plugin_folder_status(root: Path, host: str) -> dict[str, Any]:
         command_text = json.dumps(list(commands))
         hooks_ready = event_names == expected_events and root_variable in command_text
         referenced = _hook_command_paths(hooks, root_variable)
+        first_command = _first_hook_command(hooks)
     except (OSError, ValueError, AttributeError):
         event_names = set()
         hooks_ready = False
         referenced = set()
+        first_command = None
     not_ready_reasons: list[str] = []
     if not root.is_dir():
         not_ready_reasons.append(f"the plugin folder {root} does not exist")
@@ -941,6 +949,10 @@ def _plugin_folder_status(root: Path, host: str) -> dict[str, Any]:
                 f"{hooks_path} must list the {host} events and use {root_variable}"
             )
         not_ready_reasons.extend(_missing_runtime_files(root, referenced))
+        if probe and not not_ready_reasons and first_command is not None:
+            failure = _probe_hook_command(root, first_command, root_variable)
+            if failure:
+                not_ready_reasons.append(failure)
         # Claude Code loads hooks/hooks.json in addition to the file its
         # manifest names. A copy left over from an older release runs there
         # with an empty plugin root and fails on every event. No release ships
@@ -986,6 +998,65 @@ def _hook_command_paths(hooks: dict[str, Any], root_variable: str) -> set[str]:
                 if isinstance(command, str):
                     found.update(pattern.findall(command))
     return found
+
+
+def _first_hook_command(hooks: dict[str, Any]) -> str | None:
+    for groups in hooks.values():
+        for group in groups if isinstance(groups, list) else []:
+            if not isinstance(group, dict):
+                continue
+            entries = group.get("hooks", [group])
+            for entry in entries if isinstance(entries, list) else []:
+                command = entry.get("command") if isinstance(entry, dict) else None
+                if isinstance(command, str):
+                    return command
+    return None
+
+
+def _probe_hook_command(root: Path, command: str, root_variable: str) -> str | None:
+    """Start an installed copy's hook command once and report a failure.
+
+    It runs through the shell like the host runs it, with the host's root
+    variable set to the installed folder. The payload is empty, and HOME and
+    the data folder point at a temporary folder, so nothing real is read or
+    recorded. A hook that cannot import what it needs exits with an error
+    here, just as it would in a session.
+    """
+
+    if shutil.which("python3") is None:
+        # Doctor already reports a missing python3 for the hooks.
+        return None
+    variable = root_variable.strip("${}")
+    with tempfile.TemporaryDirectory() as temporary:
+        environment = {
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": temporary,
+            "LANG": os.environ.get("LANG", "C.UTF-8"),
+            "AGENT_EFFICIENCY_DATA": str(Path(temporary) / "data"),
+            variable: str(root),
+        }
+        try:
+            completed = subprocess.run(
+                command,
+                shell=True,
+                input="{}",
+                cwd=temporary,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return f"the hook command could not be started from {root}: {exc}"
+    if completed.returncode == 0:
+        return None
+    lines = (completed.stderr or completed.stdout).strip().splitlines()
+    detail = lines[-1] if lines else f"exit status {completed.returncode}"
+    return (
+        f"the hook command failed when started from {root}: {detail}; "
+        "reinstall the plugin"
+    )
 
 
 def _missing_runtime_files(root: Path, referenced: set[str]) -> list[str]:
@@ -1099,6 +1170,8 @@ def _installed_host_status(folder: Path) -> dict[str, dict[str, Any]]:
 def _claude_installs(config: Path) -> dict[str, Any]:
     record_path = config / "plugins" / "installed_plugins.json"
     installs: list[dict[str, Any]] = []
+    # Records often share one installed folder; check and start it once.
+    probed: dict[str, dict[str, Any]] = {}
     try:
         document = json.loads(record_path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -1115,7 +1188,10 @@ def _claude_installs(config: Path) -> dict[str, Any]:
             if not isinstance(record, dict):
                 continue
             path = Path(str(record.get("installPath") or ""))
-            status = _plugin_folder_status(path, "claude")
+            key = str(path)
+            if key not in probed:
+                probed[key] = _plugin_folder_status(path, "claude", probe=True)
+            status = probed[key]
             install = {
                 "plugin": plugin_id,
                 "scope": record.get("scope") or "user",
@@ -1175,7 +1251,7 @@ def _codex_installs(codex_home: Path) -> dict[str, Any]:
             )
             continue
         active = max(versions, key=lambda path: path.stat().st_mtime)
-        status = _plugin_folder_status(active, "codex")
+        status = _plugin_folder_status(active, "codex", probe=True)
         installs.append(
             {
                 "plugin": plugin_id,
@@ -1196,7 +1272,7 @@ def _cursor_installs(cursor_home: Path) -> dict[str, Any]:
     local = cursor_home / "plugins" / "local" / "agent-efficiency"
     if not local.exists() and not local.is_symlink():
         return _host_summary([])
-    status = _plugin_folder_status(local, "cursor")
+    status = _plugin_folder_status(local, "cursor", probe=True)
     return _host_summary(
         [
             {
