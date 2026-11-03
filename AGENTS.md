@@ -59,4 +59,5 @@ Also run host plugin validators when they are available.
   `refactor:`, `style:`) for commit messages and pull request titles.
 - Keep one concern per pull request. Formatting-only changes go in their own
   pull request.
-- Pull requests are squash merged after CI passes.
+- Pull requests are rebase merged after CI passes, so each commit lands on
+  `main` as written. Every commit must pass the checks on its own.

@@ -64,8 +64,9 @@ project, production telemetry, credentials, or personal data in tests or issue
 reports.
 
 Every pull request needs passing CI (lint and the test matrix) before merge.
-Pull requests are squash merged, so the pull request title becomes the commit
-message on `main`. Write it as a Conventional Commit.
+Pull requests are rebase merged, so each commit lands on `main` as written,
+with its own author. Keep every commit focused, passing, and written as a
+Conventional Commit.
 
 ## Policy and guidance changes
 
