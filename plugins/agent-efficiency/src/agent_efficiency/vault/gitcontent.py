@@ -111,12 +111,8 @@ def push_plan(
     for local_ref, local_sha, _remote_ref, remote_sha in refs:
         if _is_zero(local_sha):
             continue
-        plan.tips.append(
-            (local_ref, _tree_items(repository, local_sha, prefix, keep))
-        )
-        for location, oid in _outgoing(
-            repository, local_sha, remote_sha, prefix, keep
-        ):
+        plan.tips.append((local_ref, _tree_items(repository, local_sha, prefix, keep)))
+        for location, oid in _outgoing(repository, local_sha, remote_sha, prefix, keep):
             if oid in seen:
                 continue
             seen.add(oid)
@@ -149,8 +145,7 @@ def _tree_items(
         if _wanted(path, prefix, keep)
     ]
     return [
-        (_strip(path, prefix), data)
-        for path, data in _read_oids(repository, entries)
+        (_strip(path, prefix), data) for path, data in _read_oids(repository, entries)
     ]
 
 
@@ -192,9 +187,7 @@ def _read_paths(
             continue
         chosen.append((path, f":{path}"))
     contents = _batch(repository, [spec for _, spec in chosen])
-    return [
-        (_strip(path, prefix), contents[spec]) for path, spec in chosen
-    ]
+    return [(_strip(path, prefix), contents[spec]) for path, spec in chosen]
 
 
 def _read_oids(

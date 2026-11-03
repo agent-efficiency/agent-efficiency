@@ -115,9 +115,7 @@ def _tracked_files(root: Path) -> list[Path] | None:
         ).stdout
     except (OSError, subprocess.SubprocessError):
         return None
-    return [
-        root / name.decode("utf-8") for name in listed.split(b"\0") if name
-    ]
+    return [root / name.decode("utf-8") for name in listed.split(b"\0") if name]
 
 
 def validate_distribution(root: Path = ROOT) -> dict[str, Any]:
@@ -164,9 +162,7 @@ def validate_distribution(root: Path = ROOT) -> dict[str, Any]:
                     continue
                 relative = target.split("#", 1)[0]
                 if relative and not (path.parent / relative).resolve().exists():
-                    broken_links.append(
-                        f"{path.relative_to(root)}: {target}"
-                    )
+                    broken_links.append(f"{path.relative_to(root)}: {target}")
     if references:
         errors.append("forbidden project or personal references remain")
     if broken_links:

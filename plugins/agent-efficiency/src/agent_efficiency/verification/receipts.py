@@ -37,8 +37,7 @@ REASONS = {
     "exit_nonzero": "The check command exited with status {exit_code}.",
     "timeout": "The check command did not finish within its time limit.",
     "not_started": (
-        "The check command could not be started. Check that the program "
-        "exists on PATH."
+        "The check command could not be started. Check that the program exists on PATH."
     ),
     "workspace_unknown": (
         "The workspace state could not be read before the check, so the result "

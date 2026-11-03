@@ -287,9 +287,7 @@ def _check_items(
         try:
             text = data.decode("utf-8")
         except UnicodeDecodeError:
-            findings.append(
-                _unreadable(relative, "file is not UTF-8 text")
-            )
+            findings.append(_unreadable(relative, "file is not UTF-8 text"))
             all_notes_read = all_notes_read and not is_note_path(relative)
             continue
         if is_note_path(relative):

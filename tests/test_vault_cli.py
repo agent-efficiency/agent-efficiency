@@ -415,9 +415,7 @@ class VaultIndexTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw) / "vault-core"
             run(["vault", "init", str(root), "--classification", "core"])
-            (root / "projects" / "alpha.md").write_text(
-                note("alpha"), encoding="utf-8"
-            )
+            (root / "projects" / "alpha.md").write_text(note("alpha"), encoding="utf-8")
             run(["vault", "index", str(root)])
             payload = json.loads((root / "index.json").read_text(encoding="utf-8"))
             self.assertEqual([item["id"] for item in payload["notes"]], ["alpha"])
@@ -433,9 +431,7 @@ class VaultIndexTests(unittest.TestCase):
             code, _, err = run_both(["vault", "index", str(root)])
             self.assertEqual(code, 2)
             self.assertIn("broken.md", err)
-            self.assertEqual(
-                (root / "index.json").read_text(encoding="utf-8"), before
-            )
+            self.assertEqual((root / "index.json").read_text(encoding="utf-8"), before)
 
 
 class VaultCheckSourceTests(unittest.TestCase):
@@ -482,9 +478,7 @@ class VaultCheckSourceTests(unittest.TestCase):
                 ]
             )
             for bad in ("https://git.example.com:no/example/vault-core",):
-                code, _, err = run_both(
-                    ["vault", "check", str(root), "--remote", bad]
-                )
+                code, _, err = run_both(["vault", "check", str(root), "--remote", bad])
                 self.assertEqual(code, 2, bad)
                 self.assertIn("port", err)
 
@@ -606,9 +600,7 @@ class VaultNeedsNoDatabaseTests(unittest.TestCase):
 
             # Proof the data directory really is unusable: any command that
             # builds the Store fails on it.
-            with mock.patch.dict(
-                os.environ, {"AGENT_EFFICIENCY_DATA": str(unusable)}
-            ):
+            with mock.patch.dict(os.environ, {"AGENT_EFFICIENCY_DATA": str(unusable)}):
                 with self.assertRaises(OSError):
                     main(["status"])
 
@@ -618,7 +610,6 @@ class VaultNeedsNoDatabaseTests(unittest.TestCase):
                 )
                 self.assertEqual(run(["vault", "index", str(root)])[0], 0)
                 self.assertEqual(run(["vault", "check", str(root)])[0], 0)
-
 
 
 class VaultMigrateTests(unittest.TestCase):
@@ -729,9 +720,7 @@ class VaultMigrateTests(unittest.TestCase):
     def test_propose_needs_a_source_directory(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             out = Path(raw) / "proposal.json"
-            code, _, err = run_both(
-                ["vault", "migrate", "propose", "--out", str(out)]
-            )
+            code, _, err = run_both(["vault", "migrate", "propose", "--out", str(out)])
             self.assertEqual(code, 2)
             self.assertTrue(err.strip())
             self.assertFalse(out.exists())

@@ -35,9 +35,7 @@ def isolated_environment(home: Path) -> dict[str, str]:
     """Return the current environment with every host location in ``home``."""
 
     environment = {
-        key: value
-        for key, value in os.environ.items()
-        if key not in HOST_ENVIRONMENT
+        key: value for key, value in os.environ.items() if key not in HOST_ENVIRONMENT
     }
     environment["HOME"] = str(home)
     return environment
@@ -368,7 +366,9 @@ class InstalledHostTests(unittest.TestCase):
             (home / "custom" / ".claude").rename(home / "config")
             with (
                 isolated_home(home),
-                mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(home / "config")}),
+                mock.patch.dict(
+                    os.environ, {"CLAUDE_CONFIG_DIR": str(home / "config")}
+                ),
                 contextlib.redirect_stdout(io.StringIO()) as output,
             ):
                 main(
@@ -455,9 +455,7 @@ class InstalledHostTests(unittest.TestCase):
         text = output.getvalue()
         self.assertEqual(code, 0, text)
         self.assertIn(f"Package files at {PLUGIN_ROOT}: ready", text)
-        self.assertIn(
-            f"Claude Code: ready, 0.2.1 (user scope) at {installed}", text
-        )
+        self.assertIn(f"Claude Code: ready, 0.2.1 (user scope) at {installed}", text)
         self.assertIn("Codex: not installed", text)
         self.assertIn("Cursor: not installed", text)
 
@@ -517,9 +515,7 @@ class FolderEnablementTests(unittest.TestCase):
             folder["decided_by"], str(self.project / ".claude" / "settings.json")
         )
         fixes = " ".join(folder["fixes"])
-        self.assertIn(
-            f"claude plugin enable {PLUGIN_ID} --scope project", fixes
-        )
+        self.assertIn(f"claude plugin enable {PLUGIN_ID} --scope project", fixes)
         self.assertIn(
             f"claude plugin uninstall {PLUGIN_ID} --scope project --keep-data", fixes
         )
@@ -599,7 +595,9 @@ class FolderEnablementTests(unittest.TestCase):
                 claude_record(self.cache, scope="project", projectPath=str(other)),
             ],
         )
-        write_json(other / ".claude" / "settings.json", {"enabledPlugins": {PLUGIN_ID: False}})
+        write_json(
+            other / ".claude" / "settings.json", {"enabledPlugins": {PLUGIN_ID: False}}
+        )
         code, doctor = run_doctor(self.home, self.project)
         self.assertEqual(code, 0)
         folder = self.folder(doctor)
@@ -636,7 +634,9 @@ class FolderEnablementTests(unittest.TestCase):
         self.assertEqual(code, 1)
         folder = self.folder(doctor)
         self.assertEqual(folder["status"], "installed but disabled in this folder")
-        self.assertEqual(folder["decided_by"], str(nested / ".claude" / "settings.json"))
+        self.assertEqual(
+            folder["decided_by"], str(nested / ".claude" / "settings.json")
+        )
 
     def test_shared_settings_at_the_git_root_do_not_reach_a_subfolder(self) -> None:
         git_repository(self.project)
@@ -746,7 +746,8 @@ class FolderEnablementTests(unittest.TestCase):
         self.assertEqual(code, 1)
         folder = self.folder(doctor)
         self.assertEqual(
-            folder["decided_by"], str(managed / "managed-settings.d" / "50-plugins.json")
+            folder["decided_by"],
+            str(managed / "managed-settings.d" / "50-plugins.json"),
         )
         self.assertIn("administrator", " ".join(folder["fixes"]))
 

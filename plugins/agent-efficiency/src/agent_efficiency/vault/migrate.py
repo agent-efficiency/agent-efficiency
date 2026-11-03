@@ -192,9 +192,7 @@ def sanitize_id(value: str) -> str:
     cleaned = cleaned.strip(ID_SEPARATOR)
 
     if not cleaned:
-        raise MigrationError(
-            f"{value!r} holds no character that can form a note id"
-        )
+        raise MigrationError(f"{value!r} holds no character that can form a note id")
     return cleaned
 
 
@@ -478,8 +476,7 @@ def _validate_entry(given: object, roots: dict[str, Path], position: int) -> dic
         )
     if entry["classification"] not in roots:
         raise MigrationError(
-            f"{where}: no tree was given for classification "
-            f"{entry['classification']!r}"
+            f"{where}: no tree was given for classification {entry['classification']!r}"
         )
     if entry["type"] not in TYPES:
         raise MigrationError(
@@ -489,8 +486,7 @@ def _validate_entry(given: object, roots: dict[str, Path], position: int) -> dic
     entry["status"] = given.get("status", "active")
     if entry["status"] not in STATUSES:
         raise MigrationError(
-            f"{where}: status {entry['status']!r} is not one of "
-            f"{', '.join(STATUSES)}"
+            f"{where}: status {entry['status']!r} is not one of {', '.join(STATUSES)}"
         )
 
     entry["updated"] = given.get("updated", "") or _today()
@@ -723,9 +719,7 @@ def _verify(text: str, entry: dict, body: str) -> Note:
     return note
 
 
-def _check_prospective_trees(
-    roots: dict[str, Path], planned: list[_Write]
-) -> None:
+def _check_prospective_trees(roots: dict[str, Path], planned: list[_Write]) -> None:
     """Index the complete tree each write would produce, before writing any of it.
 
     Validating entries against each other is not enough. A note already in the

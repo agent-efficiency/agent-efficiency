@@ -29,9 +29,7 @@ MAX_PACK_BYTES = 1_048_576
 PACK_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,95}$")
 CARD_ID = re.compile(r"^core[.][a-z0-9][a-z0-9.-]{1,94}$")
 SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
-TIMESTAMP = re.compile(
-    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
-)
+TIMESTAMP = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 PACK_KEYS = {
     "schema_version",
     "kind",
@@ -482,10 +480,9 @@ def _validate_card(raw: Any, path: str) -> Mapping[str, Any]:
 def _version_in_range(version: str, value: Any) -> bool:
     limits = _exact_object(value, "$.version_range", {"min_inclusive", "max_exclusive"})
     current = _version_tuple(version)
-    return (
-        _version_tuple(str(limits["min_inclusive"])) <= current
-        and current < _version_tuple(str(limits["max_exclusive"]))
-    )
+    return _version_tuple(
+        str(limits["min_inclusive"])
+    ) <= current and current < _version_tuple(str(limits["max_exclusive"]))
 
 
 def _version_range(value: Any, path: str) -> None:
@@ -558,7 +555,9 @@ def _string(value: Any, path: str, minimum: int, maximum: int) -> str:
 
 def _string_list(value: Any, path: str, minimum: int, maximum: int) -> list[str]:
     items = _list(value, path, minimum, maximum)
-    result = [_string(item, f"{path}[{index}]", 1, 160) for index, item in enumerate(items)]
+    result = [
+        _string(item, f"{path}[{index}]", 1, 160) for index, item in enumerate(items)
+    ]
     if len(result) != len(set(result)):
         raise ContractViolation("duplicate_value", path, "items must be unique")
     return result

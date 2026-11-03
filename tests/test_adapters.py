@@ -51,9 +51,7 @@ class AdapterContractTests(unittest.TestCase):
             ),
         )
         events = [adapter_for(host).to_event(payload) for host, payload in fixtures]
-        self.assertEqual(
-            {event.name for event in events if event}, {"turn.prompted"}
-        )
+        self.assertEqual({event.name for event in events if event}, {"turn.prompted"})
         self.assertEqual(len({event.project_id for event in events if event}), 1)
         for event in events:
             self.assertIsNotNone(event)
@@ -78,9 +76,7 @@ class AdapterContractTests(unittest.TestCase):
         claude = adapter_for("claude").render(
             self.effect(), native_event="UserPromptSubmit"
         )
-        cursor = adapter_for("cursor").render(
-            self.effect(), native_event="postToolUse"
-        )
+        cursor = adapter_for("cursor").render(self.effect(), native_event="postToolUse")
         codex = adapter_for("codex").render(
             self.effect(), native_event="UserPromptSubmit"
         )

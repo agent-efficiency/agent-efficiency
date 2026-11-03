@@ -217,9 +217,7 @@ class ExperimentTests(unittest.TestCase):
             acceptance_evidence_digest=evidence_digest("immutable-1"),
             wall_time_minutes=10,
         )
-        evaluation = build_experiment_evaluation(
-            self.store, experiment_id="team-pilot"
-        )
+        evaluation = build_experiment_evaluation(self.store, experiment_id="team-pilot")
         advise = evaluation["strata"][0]["cohorts"]["advise"]
         self.assertEqual(advise["invalidated"], 1)
         self.assertEqual(advise["verified_accepted"], 0)
@@ -261,9 +259,7 @@ class ExperimentTests(unittest.TestCase):
                 acceptance_evidence_digest=evidence_digest("unverified-1"),
                 wall_time_minutes=20,
             )
-        evaluation = build_experiment_evaluation(
-            self.store, experiment_id="team-pilot"
-        )
+        evaluation = build_experiment_evaluation(self.store, experiment_id="team-pilot")
         self.assertFalse(evaluation["cost_claim_gate"]["eligible"])
         cohort = evaluation["strata"][0]["cohorts"]["observe"]
         self.assertEqual(cohort["verified_accepted"], 0)
@@ -481,9 +477,7 @@ class ExperimentTests(unittest.TestCase):
                     escaped_defects=0,
                 )
 
-        evaluation = build_experiment_evaluation(
-            self.store, experiment_id="team-pilot"
-        )
+        evaluation = build_experiment_evaluation(self.store, experiment_id="team-pilot")
         self.assertTrue(evaluation["cost_claim_gate"]["eligible"])
         self.assertEqual(evaluation["cost_claim_gate"]["eligible_strata"], 1)
         stratum = evaluation["strata"][0]
@@ -523,9 +517,7 @@ class ExperimentTests(unittest.TestCase):
             blinded=True,
         )
         self.store.record_status_sample("advise-missing-outcome", {"cost_usd": 1.0})
-        incomplete = build_experiment_evaluation(
-            self.store, experiment_id="team-pilot"
-        )
+        incomplete = build_experiment_evaluation(self.store, experiment_id="team-pilot")
         self.assertFalse(incomplete["cost_claim_gate"]["eligible"])
         self.assertFalse(incomplete["strata"][0]["outcomes_complete"])
         self.assertIn("lack an outcome", incomplete["strata"][0]["cost_claim_reason"])
@@ -602,7 +594,9 @@ class ExperimentTests(unittest.TestCase):
                         wall_time_minutes=10,
                     )
 
-        evaluation = build_experiment_evaluation(self.store, experiment_id="cross-host-pilot")
+        evaluation = build_experiment_evaluation(
+            self.store, experiment_id="cross-host-pilot"
+        )
         pilot = evaluation["pilot"]
         self.assertEqual(pilot["status"], "pass")
         self.assertEqual(pilot["matched_tasks"], 30)

@@ -42,9 +42,7 @@ def host_store(folder: Path, session_id: str) -> Store:
     (folder / "vault.json").write_text(
         json.dumps({"schema": 1, "trees": []}) + "\n", encoding="utf-8"
     )
-    (store.paths.capability_packs / "example.json").write_text(
-        "{}\n", encoding="utf-8"
-    )
+    (store.paths.capability_packs / "example.json").write_text("{}\n", encoding="utf-8")
     return store
 
 
@@ -60,7 +58,9 @@ def run_hook(environment: dict[str, str], payload: dict) -> subprocess.Completed
     )
 
 
-def run_cli(environment: dict[str, str], *arguments: str) -> subprocess.CompletedProcess:
+def run_cli(
+    environment: dict[str, str], *arguments: str
+) -> subprocess.CompletedProcess:
     child = dict(environment)
     child["PYTHONPATH"] = str(PLUGIN_ROOT / "src")
     return subprocess.run(
@@ -112,9 +112,7 @@ def hook_payload(home: Path, session_id: str) -> dict:
 
 
 def _adopt(target: str, source: str) -> str | None:
-    copied = host_data.adopt_host_store(
-        Path(target), {"CLAUDE_PLUGIN_DATA": source}
-    )
+    copied = host_data.adopt_host_store(Path(target), {"CLAUDE_PLUGIN_DATA": source})
     return str(copied) if copied else None
 
 
@@ -159,9 +157,7 @@ class DataFolderResolutionTests(unittest.TestCase):
                 )
                 self.assertEqual(started.returncode, 0, started.stderr)
                 self.assertFalse((home / relative / "agent-efficiency.db").exists())
-                status = run_cli(
-                    isolated_environment(home), "status", "--json"
-                )
+                status = run_cli(isolated_environment(home), "status", "--json")
                 self.assertEqual(status.returncode, 0, status.stderr)
                 self.assertEqual(
                     json.loads(status.stdout)["session_id"],
@@ -190,9 +186,7 @@ class HostStoreCopyTests(unittest.TestCase):
             self.assertIsNotNone(store.get_session("after-upgrade"))
             self.assertEqual(store.default_mode(), "observe")
             self.assertTrue((target / "vault.json").is_file())
-            self.assertTrue(
-                (target / "knowledge" / "packs" / "example.json").is_file()
-            )
+            self.assertTrue((target / "knowledge" / "packs" / "example.json").is_file())
             record = json.loads(
                 (target / host_data.COPY_RECORD).read_text(encoding="utf-8")
             )
@@ -234,9 +228,7 @@ class HostStoreCopyTests(unittest.TestCase):
             source = Path(temp) / "plugin"
             host_store(source, "plugin-session")
             target = Path(temp) / "data"
-            Store(target).ensure_session(
-                "own-session", host="claude", cwd="/work/app"
-            )
+            Store(target).ensure_session("own-session", host="claude", cwd="/work/app")
             copied = host_data.adopt_host_store(
                 target, {"CLAUDE_PLUGIN_DATA": str(source)}
             )
@@ -254,9 +246,7 @@ class HostStoreCopyTests(unittest.TestCase):
             own = json.dumps({"schema": 1, "trees": ["/own/tree"]}) + "\n"
             (target / "vault.json").write_text(own, encoding="utf-8")
             host_data.adopt_host_store(target, {"CLAUDE_PLUGIN_DATA": str(source)})
-            self.assertEqual(
-                (target / "vault.json").read_text(encoding="utf-8"), own
-            )
+            self.assertEqual((target / "vault.json").read_text(encoding="utf-8"), own)
             self.assertIsNotNone(Store(target).get_session("plugin-session"))
 
     def test_racing_hooks_copy_once(self) -> None:
@@ -265,9 +255,7 @@ class HostStoreCopyTests(unittest.TestCase):
             host_store(source, "raced")
             target = Path(temp) / "data"
             with ProcessPoolExecutor(max_workers=8) as pool:
-                results = list(
-                    pool.map(_adopt, [str(target)] * 16, [str(source)] * 16)
-                )
+                results = list(pool.map(_adopt, [str(target)] * 16, [str(source)] * 16))
             self.assertEqual(
                 [result for result in results if result], [str(source.resolve())]
             )
@@ -288,7 +276,11 @@ class HostStoreCopyTests(unittest.TestCase):
             host_store(home / CLAUDE_DATA, "not-copied")
             chosen = home / "chosen"
             status = run_cli(
-                isolated_environment(home), "--data-dir", str(chosen), "status", "--json"
+                isolated_environment(home),
+                "--data-dir",
+                str(chosen),
+                "status",
+                "--json",
             )
             self.assertEqual(status.returncode, 0, status.stderr)
             self.assertIsNone(json.loads(status.stdout)["session"])

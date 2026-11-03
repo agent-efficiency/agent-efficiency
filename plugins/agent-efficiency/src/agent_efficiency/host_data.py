@@ -480,8 +480,12 @@ def _recovery_steps(folder: Path, target: Path) -> str:
 def _missing_sessions(source: Path, target: Path) -> tuple[int, int]:
     """Count the source's sessions and those the target does not hold."""
 
-    with closing(sqlite3.connect(f"file:{source}?mode=ro", uri=True, timeout=1.0)) as old:
+    with closing(
+        sqlite3.connect(f"file:{source}?mode=ro", uri=True, timeout=1.0)
+    ) as old:
         sessions = {row[0] for row in old.execute("SELECT session_id FROM sessions")}
-    with closing(sqlite3.connect(f"file:{target}?mode=ro", uri=True, timeout=1.0)) as new:
+    with closing(
+        sqlite3.connect(f"file:{target}?mode=ro", uri=True, timeout=1.0)
+    ) as new:
         present = {row[0] for row in new.execute("SELECT session_id FROM sessions")}
     return len(sessions), len(sessions - present)

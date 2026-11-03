@@ -126,9 +126,7 @@ class ProposalTests(unittest.TestCase):
             (remember / "remember.md").write_text(SOURCE, encoding="utf-8")
             ids = [
                 item["id"]
-                for item in propose(memory_dir=memory, remember_dir=remember)[
-                    "entries"
-                ]
+                for item in propose(memory_dir=memory, remember_dir=remember)["entries"]
             ]
             self.assertEqual(sorted(ids), ["alpha", "beta"])
 
@@ -373,9 +371,7 @@ class ApplyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             work = make_tree(Path(raw) / "vault-work", "work")
             with self.assertRaises(MigrationError):
-                apply_proposal(
-                    proposal(entry(classification="public")), {"work": work}
-                )
+                apply_proposal(proposal(entry(classification="public")), {"work": work})
 
     def test_refuses_a_classification_with_no_tree(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -412,9 +408,7 @@ class ApplyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             work = make_tree(Path(raw) / "vault-work", "work")
             with self.assertRaises(MigrationError) as caught:
-                apply_proposal(
-                    proposal(entry(classifcation="work")), {"work": work}
-                )
+                apply_proposal(proposal(entry(classifcation="work")), {"work": work})
             self.assertIn("classifcation", str(caught.exception))
 
     def test_refuses_an_id_that_is_not_already_sanitized(self) -> None:
@@ -431,9 +425,7 @@ class ApplyTests(unittest.TestCase):
             for smuggled in ("state\nstatus: done", "state\nrepos: [one, two]"):
                 with self.subTest(smuggled=smuggled):
                     with self.assertRaises(MigrationError) as caught:
-                        apply_proposal(
-                            proposal(entry(hook=smuggled)), {"work": work}
-                        )
+                        apply_proposal(proposal(entry(hook=smuggled)), {"work": work})
                     self.assertIn("field 'hook'", str(caught.exception))
             self.assertFalse((work / "projects" / "umbra.md").exists())
 
@@ -441,17 +433,13 @@ class ApplyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             work = make_tree(Path(raw) / "vault-work", "work")
             with self.assertRaises(MigrationError):
-                apply_proposal(
-                    proposal(entry(title="umbra [engine]")), {"work": work}
-                )
+                apply_proposal(proposal(entry(title="umbra [engine]")), {"work": work})
 
     def test_refuses_an_exotic_line_break_in_a_body(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             work = make_tree(Path(raw) / "vault-work", "work")
             with self.assertRaises(MigrationError) as caught:
-                apply_proposal(
-                    proposal(entry(body="one\u2028two")), {"work": work}
-                )
+                apply_proposal(proposal(entry(body="one\u2028two")), {"work": work})
             self.assertIn("project_umbra.md", str(caught.exception))
             self.assertFalse((work / "projects" / "umbra.md").exists())
 
@@ -617,6 +605,7 @@ class RoundTripTests(unittest.TestCase):
             archive = work / "projects" / "newsletter" / "archive" / "0001-imported.md"
             self.assertIn("detail line", archive.read_text(encoding="utf-8"))
 
+
 class RoundTripGuardTests(unittest.TestCase):
     """Pin the last check a note passes before it is written.
 
@@ -661,6 +650,7 @@ class RoundTripGuardTests(unittest.TestCase):
         text = _render(item, item["body"]).replace("type: project", "type: notes")
         with self.assertRaises(MigrationError):
             _verify(text, item, item["body"])
+
 
 def reviewed(proposal: dict, classification: str = "work") -> dict:
     """A proposal after the review step that decides every classification."""
@@ -1039,9 +1029,7 @@ class ArchiveFidelityTests(unittest.TestCase):
         work = make_tree(Path(raw) / "vault-work", "work")
         found = reviewed(propose(memory_dir=memory, remember_dir=None))
         apply_proposal(found, {"work": work})
-        return work, (
-            work / "projects" / "newsletter" / "archive" / "0001-imported.md"
-        )
+        return work, (work / "projects" / "newsletter" / "archive" / "0001-imported.md")
 
     def test_an_archive_is_the_source_byte_for_byte(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -1076,9 +1064,7 @@ class ArchiveFidelityTests(unittest.TestCase):
             (memory / "project_newsletter.md").write_bytes(payload)
             found = propose(memory_dir=memory, remember_dir=None)
             item = found["entries"][0]
-            self.assertEqual(
-                item["digest"], hashlib.sha256(payload).hexdigest()
-            )
+            self.assertEqual(item["digest"], hashlib.sha256(payload).hexdigest())
             self.assertEqual(item["raw"].encode("utf-8"), payload)
 
     def test_an_edited_body_with_a_stale_digest_is_refused(self) -> None:
