@@ -1,0 +1,3 @@
+# Receipts and pack checks hash file bytes. Normalize line endings so a fresh
+# checkout on any system produces the same digests.
+* text=auto eol=lf
