@@ -114,9 +114,7 @@ def iter_note_paths(root: Path) -> list[Path]:
         found = walk_markdown(root)
     except WalkError as exc:
         raise IndexError_(str(exc)) from None
-    return [
-        path for path in found if is_note_path(path.relative_to(root).as_posix())
-    ]
+    return [path for path in found if is_note_path(path.relative_to(root).as_posix())]
 
 
 def build_index(root: Path) -> dict:
@@ -125,9 +123,7 @@ def build_index(root: Path) -> dict:
     return _build(_tree(root))
 
 
-def build_from_notes(
-    classification: str, notes: Iterable[tuple[str, str]]
-) -> dict:
+def build_from_notes(classification: str, notes: Iterable[tuple[str, str]]) -> dict:
     """Build an index payload from note text that is already in hand.
 
     ``notes`` carries ``(path relative to the tree root, note text)`` pairs.
@@ -141,9 +137,7 @@ def build_from_notes(
     for relative, text in notes:
         note = _parse(relative, text)
         if note.type not in _TYPE_RANK:
-            raise IndexError_(
-                f"{relative}: note type {note.type!r} has no index order"
-            )
+            raise IndexError_(f"{relative}: note type {note.type!r} has no index order")
         if note.classification != classification:
             raise IndexError_(
                 f"{relative}: classification {note.classification!r} does not "

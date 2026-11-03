@@ -7,7 +7,9 @@ from agent_efficiency.vault.frontmatter import FrontmatterError, parse_note
 
 class FrontmatterGrammarTests(unittest.TestCase):
     def test_parses_scalars_and_lists(self) -> None:
-        text = "---\nid: umbra\nrepos: [umbra-dev/umbra, other/repo]\n---\n\nBody line.\n"
+        text = (
+            "---\nid: umbra\nrepos: [umbra-dev/umbra, other/repo]\n---\n\nBody line.\n"
+        )
         parsed = parse_note(text)
         self.assertEqual(parsed.fields["id"], "umbra")
         self.assertEqual(parsed.fields["repos"], ["umbra-dev/umbra", "other/repo"])

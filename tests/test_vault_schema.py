@@ -25,13 +25,17 @@ VALID = (
 class NoteSchemaTests(unittest.TestCase):
     def test_hook_at_the_cap_is_accepted(self) -> None:
         hook = "h" * HOOK_CAP
-        note = load_note(VALID.replace("hook: engine state and next move", f"hook: {hook}"))
+        note = load_note(
+            VALID.replace("hook: engine state and next move", f"hook: {hook}")
+        )
         self.assertEqual(note.hook, hook)
 
     def test_hook_over_the_cap_is_refused_by_name(self) -> None:
         hook = "h" * (HOOK_CAP + 1)
         with self.assertRaises(FrontmatterError) as caught:
-            load_note(VALID.replace("hook: engine state and next move", f"hook: {hook}"))
+            load_note(
+                VALID.replace("hook: engine state and next move", f"hook: {hook}")
+            )
         self.assertIn("hook", str(caught.exception))
         self.assertIn(str(HOOK_CAP), str(caught.exception))
 
@@ -164,9 +168,7 @@ class FieldValidationTests(unittest.TestCase):
         self.assertIn("notes", str(caught.exception))
 
     def test_accepts_every_known_key(self) -> None:
-        text = VALID.replace(
-            "hook: ", "branches: [main]\nlinks: [other-note]\nhook: "
-        )
+        text = VALID.replace("hook: ", "branches: [main]\nlinks: [other-note]\nhook: ")
         note = load_note(text)
         self.assertEqual(note.branches, ("main",))
         self.assertEqual(note.links, ("other-note",))

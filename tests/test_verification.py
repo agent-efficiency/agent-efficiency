@@ -447,7 +447,9 @@ class ReceiptColumnRaceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             store = Store(temp)
             with store.connect() as conn:
-                conn.execute("ALTER TABLE verification_receipts DROP COLUMN reason_code")
+                conn.execute(
+                    "ALTER TABLE verification_receipts DROP COLUMN reason_code"
+                )
 
             class SlowConnection(sqlite3.Connection):
                 """Widen the gap between reading the columns and adding one."""

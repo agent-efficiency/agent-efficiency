@@ -42,7 +42,9 @@ class VaultPrivacyCanaryTests(unittest.TestCase):
             store = Store(base / "data")
             project = make_repo(
                 base / "project",
-                remotes={"origin": "git@git.example.com:canaryowner7731/canaryrepo7731.git"},
+                remotes={
+                    "origin": "git@git.example.com:canaryowner7731/canaryrepo7731.git"
+                },
                 branch="canarybranch7731",
             )
             (project / "src").mkdir()

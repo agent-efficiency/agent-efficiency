@@ -194,9 +194,7 @@ class PreCommitTests(HookHarness):
         self.run_git("add", "-A")
         self.run_git("commit", "-m", "alpha")
 
-        self.stage_then_restore(
-            "feedback/copy.md", note("alpha"), note("second")
-        )
+        self.stage_then_restore("feedback/copy.md", note("alpha"), note("second"))
         result = self.git("commit", "-m", "copy")
         self.assertNotEqual(result.returncode, 0, "the duplicate id committed")
         self.assertIn("duplicate_id", result.stdout + result.stderr)
@@ -281,9 +279,7 @@ class PrePushTests(HookHarness):
         self.commit_without_checking(
             "projects/alpha.md", note("alpha", "private"), "wrong"
         )
-        self.commit_without_checking(
-            "projects/alpha.md", note("alpha"), "corrected"
-        )
+        self.commit_without_checking("projects/alpha.md", note("alpha"), "corrected")
         result = self.push()
         output = result.stdout + result.stderr
         self.assertNotEqual(result.returncode, 0, "the misclassified history pushed")
@@ -347,8 +343,9 @@ class PrePushTests(HookHarness):
         self.assertNotEqual(result.returncode, 0, "the push went to the wrong twin")
         self.assertIn("destination", result.stdout + result.stderr)
         self.assertEqual(
-            self.git("--git-dir", str(twin), "rev-list", "--count", "--all")
-            .stdout.strip(),
+            self.git(
+                "--git-dir", str(twin), "rev-list", "--count", "--all"
+            ).stdout.strip(),
             "0",
         )
 
@@ -362,8 +359,9 @@ class PrePushTests(HookHarness):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("classification", result.stdout + result.stderr)
         self.assertEqual(
-            self.git("--git-dir", str(self.origin), "rev-list", "--count", "--all")
-            .stdout.strip(),
+            self.git(
+                "--git-dir", str(self.origin), "rev-list", "--count", "--all"
+            ).stdout.strip(),
             "0",
             "the remote received the commit",
         )

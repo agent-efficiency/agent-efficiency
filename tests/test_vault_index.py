@@ -327,9 +327,7 @@ class RenderTests(unittest.TestCase):
         self.assertNotIn("(draft)", markdown)
 
     def test_renders_an_empty_tree_without_a_dangling_list(self) -> None:
-        markdown = render_markdown(
-            {"schema": 1, "classification": "core", "notes": []}
-        )
+        markdown = render_markdown({"schema": 1, "classification": "core", "notes": []})
         self.assertIn("# Vault index (core)", markdown)
         self.assertNotIn("- [", markdown)
         self.assertTrue(markdown.endswith("\n"))
@@ -386,9 +384,7 @@ class WriteIndexTests(unittest.TestCase):
             write_index(root)
             (root / "projects" / "alpha.md").unlink()
             write_index(root)
-            self.assertNotIn(
-                "alpha", (root / "INDEX.md").read_text(encoding="utf-8")
-            )
+            self.assertNotIn("alpha", (root / "INDEX.md").read_text(encoding="utf-8"))
 
     def test_replaces_each_target_instead_of_writing_through_it(self) -> None:
         """A rename swaps in a new file. Writing in place would corrupt a reader
@@ -527,9 +523,7 @@ class BuildFromNotesTests(unittest.TestCase):
 
     def test_reports_a_classification_that_does_not_match(self) -> None:
         with self.assertRaises(IndexError_):
-            build_from_notes(
-                "core", [("projects/alpha.md", note("alpha", "project"))]
-            )
+            build_from_notes("core", [("projects/alpha.md", note("alpha", "project"))])
 
 
 class PreflightTests(unittest.TestCase):
@@ -636,8 +630,7 @@ class IndexGenerationTests(unittest.TestCase):
             root = Path(raw)
             self.prepare(root)
             before = {
-                name: (root / name).read_bytes()
-                for name in ("index.json", "INDEX.md")
+                name: (root / name).read_bytes() for name in ("index.json", "INDEX.md")
             }
 
             (root / "projects" / "beta.md").write_text(

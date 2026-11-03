@@ -766,7 +766,11 @@ def _smoke_test(args: argparse.Namespace) -> int:
         # The same command the hosts run: the plugin's hook script, without
         # the site directory.
         root = PLUGIN_ROOT
-        command = [sys.executable, "-S", str(root / "scripts" / "agent_efficiency_hook.py")]
+        command = [
+            sys.executable,
+            "-S",
+            str(root / "scripts" / "agent_efficiency_hook.py"),
+        ]
         described = str(command[-1])
     else:
         # An installed package has no plugin folder and no hook script. Its
@@ -1177,9 +1181,7 @@ def _claude_installs(config: Path) -> dict[str, Any]:
     except FileNotFoundError:
         return _host_summary(installs)
     except (OSError, ValueError) as exc:
-        return _host_summary(
-            installs, error=f"{record_path} could not be read: {exc}"
-        )
+        return _host_summary(installs, error=f"{record_path} could not be read: {exc}")
     plugins = document.get("plugins") if isinstance(document, dict) else None
     for plugin_id, records in (plugins or {}).items():
         if not str(plugin_id).startswith(PLUGIN_ID_PREFIX):
@@ -1393,9 +1395,7 @@ def _doctor(
             )
         ),
         "data_copy": copy_error,
-        "unused_data_dirs": unused_host_stores(
-            root, os.environ, copy_error=copy_error
-        ),
+        "unused_data_dirs": unused_host_stores(root, os.environ, copy_error=copy_error),
         "database": str(database),
         "database_ready": database.is_file(),
         "default_mode": store.default_mode() if store is not None else None,
@@ -1573,8 +1573,7 @@ def _format_installed(installed: dict[str, Any]) -> list[str]:
             )
             label = (
                 "warning"
-                if install.get("applies_here") is False
-                and install["scope"] != "user"
+                if install.get("applies_here") is False and install["scope"] != "user"
                 else "fix"
             )
             lines.extend(

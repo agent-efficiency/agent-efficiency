@@ -113,8 +113,7 @@ class CapabilityPackTests(unittest.TestCase):
 
     def test_policy_pack_uses_guidance_wording(self) -> None:
         policies = {
-            policy["id"]: policy
-            for policy in capability_pack_policies(self.pack)
+            policy["id"]: policy for policy in capability_pack_policies(self.pack)
         }
         for card in self.pack["cards"]:
             self.assertEqual(policies[card["id"]]["message"], card["directive"])

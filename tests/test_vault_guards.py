@@ -123,9 +123,7 @@ class SecretScanTests(unittest.TestCase):
         text = f"first {TOKEN}\nsecond {OTHER_TOKEN}\n"
         hits = scan_secrets(text)
         self.assertEqual([hit.rule for hit in hits], ["github_token", "github_token"])
-        self.assertEqual(
-            [hit.location for hit in hits], ["line 1", "line 2"]
-        )
+        self.assertEqual([hit.location for hit in hits], ["line 1", "line 2"])
 
     def test_reports_one_finding_per_rule_and_line(self) -> None:
         hits = scan_secrets(f"{TOKEN} and {OTHER_TOKEN} on one line")
@@ -152,9 +150,7 @@ class TreeCheckTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             make_tree(root)
-            (root / "projects" / "alpha.md").write_text(
-                note("alpha"), encoding="utf-8"
-            )
+            (root / "projects" / "alpha.md").write_text(note("alpha"), encoding="utf-8")
             index_module.write_index(root)
             self.assertEqual(check_tree(root), [])
 
@@ -185,9 +181,7 @@ class TreeCheckTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             make_tree(root)
-            (root / "projects" / "alpha.md").write_text(
-                note("alpha"), encoding="utf-8"
-            )
+            (root / "projects" / "alpha.md").write_text(note("alpha"), encoding="utf-8")
             index_module.write_index(root)
             findings = check_tree(
                 root, remote_url="git@git.example.com:example/vault-core.git"
@@ -254,9 +248,7 @@ class TreeCheckTests(unittest.TestCase):
             # The brace makes the scalar illegal, so the parser message would
             # otherwise quote the value back.
             (root / "projects" / "alpha.md").write_text(
-                note("alpha").replace(
-                    "title: alpha title", "title: {" + TOKEN + "}"
-                ),
+                note("alpha").replace("title: alpha title", "title: {" + TOKEN + "}"),
                 encoding="utf-8",
             )
             findings = check_tree(root)
@@ -286,9 +278,7 @@ class TreeCheckTests(unittest.TestCase):
             )
             findings = check_tree(root)
             self.assertEqual([item.rule for item in findings], ["github_token"])
-            self.assertEqual(
-                findings[0].location, "projects/alpha/archive/0001.md:2"
-            )
+            self.assertEqual(findings[0].location, "projects/alpha/archive/0001.md:2")
 
     def test_does_not_apply_the_note_schema_to_archived_files(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -305,12 +295,8 @@ class TreeCheckTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             make_tree(root)
-            (root / "projects" / "one.md").write_text(
-                note("same"), encoding="utf-8"
-            )
-            (root / "projects" / "two.md").write_text(
-                note("same"), encoding="utf-8"
-            )
+            (root / "projects" / "one.md").write_text(note("same"), encoding="utf-8")
+            (root / "projects" / "two.md").write_text(note("same"), encoding="utf-8")
             findings = check_tree(root)
             self.assertEqual([item.rule for item in findings], ["duplicate_id"])
             self.assertIn("one.md", findings[0].detail)
@@ -369,6 +355,7 @@ class TreeCheckTests(unittest.TestCase):
             with self.assertRaises(GuardError):
                 check_tree(root)
 
+
 class ContentCheckTests(unittest.TestCase):
     """The rules applied to content that was handed over, not read from disk.
 
@@ -425,9 +412,7 @@ class ContentCheckTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             make_tree(root, index=False)
-            self.assertEqual(
-                self.check(root, [("INDEX.md", f"text\n{TOKEN}\n")]), []
-            )
+            self.assertEqual(self.check(root, [("INDEX.md", f"text\n{TOKEN}\n")]), [])
             self.assertFalse(is_scannable("index.json"))
             self.assertFalse(is_scannable("INDEX.md"))
             self.assertTrue(is_scannable("projects/a/archive/INDEX.md"))
@@ -436,7 +421,9 @@ class ContentCheckTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             make_tree(root, index=False)
-            findings = self.check(root, [], remote="git@git.example.com:someone/other.git")
+            findings = self.check(
+                root, [], remote="git@git.example.com:someone/other.git"
+            )
             self.assertEqual([item.rule for item in findings], ["destination"])
 
     def test_refuses_a_path_that_leaves_the_tree(self) -> None:
@@ -637,14 +624,13 @@ class FreshCloneTests(unittest.TestCase):
             )
             self.assertNotIn(self.refusal, before.stderr)
 
-            self.run_git(
-                "config", "--local", "core.hooksPath", ".githooks", cwd=clone
-            )
+            self.run_git("config", "--local", "core.hooksPath", ".githooks", cwd=clone)
             after = self.commit(clone, "beta")
             self.assertNotEqual(
                 after.returncode, 0, "the hook did not run after core.hooksPath"
             )
             self.assertIn(self.refusal, after.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

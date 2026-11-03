@@ -32,6 +32,7 @@ def in_plugin_folder(root: Path | None = None) -> bool:
         candidate / "hooks"
     ).is_dir()
 
+
 # The data folder holds session history and the list of vault trees, so only
 # its owner may read it. These modes are set on what this package creates,
 # whatever the umask. Existing folders and files keep their modes; doctor

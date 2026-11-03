@@ -202,7 +202,9 @@ def capability_status(store: Store, session_id: str | None = None) -> dict[str, 
         "cards": {
             "active": len(pack["cards"]),
             "expired": sum(
-                1 for card in pack["cards"] if not _expires_after(card, datetime.now(UTC))
+                1
+                for card in pack["cards"]
+                if not _expires_after(card, datetime.now(UTC))
             ),
         },
         "receipts": receipts,

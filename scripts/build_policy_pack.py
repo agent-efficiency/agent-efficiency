@@ -185,7 +185,9 @@ def build_pack() -> dict[str, Any]:
 
 
 def encoded_pack() -> bytes:
-    return json.dumps(build_pack(), ensure_ascii=False, indent=2).encode("utf-8") + b"\n"
+    return (
+        json.dumps(build_pack(), ensure_ascii=False, indent=2).encode("utf-8") + b"\n"
+    )
 
 
 def main() -> int:

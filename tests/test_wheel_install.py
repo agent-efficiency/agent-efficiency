@@ -113,7 +113,9 @@ class WheelLayoutTests(unittest.TestCase):
         self.assertGreater(doctor["active_policy_count"], 0)
 
     def test_knowledge_status_reads_the_bundled_pack(self) -> None:
-        self.assertIn("agent-efficiency-guidance", self.assert_runs("knowledge", "status"))
+        self.assertIn(
+            "agent-efficiency-guidance", self.assert_runs("knowledge", "status")
+        )
 
     def test_smoke_test_runs_the_installed_package(self) -> None:
         for host in ("claude", "codex", "cursor"):
@@ -121,7 +123,9 @@ class WheelLayoutTests(unittest.TestCase):
                 result = json.loads(self.assert_runs("smoke-test", host, "--json"))
                 self.assertTrue(result["ok"])
                 self.assertTrue(result["native_response_shape_valid"])
-                self.assertIn("agent_efficiency.hook_entry", result["command_under_test"])
+                self.assertIn(
+                    "agent_efficiency.hook_entry", result["command_under_test"]
+                )
 
     def test_status_report_and_vault_check_run(self) -> None:
         self.assert_runs("status")

@@ -111,7 +111,9 @@ class SelectProjectTests(unittest.TestCase):
             remotes={"origin": "https://gitlab.com/git.example.com/acme/widget.git"},
         )
         idx = indexes(
-            private=[entry("widget", repos=("https://git.example.com/acme/widget.git",))]
+            private=[
+                entry("widget", repos=("https://git.example.com/acme/widget.git",))
+            ]
         )
         self.assertEqual(self.select(repo, idx).outcome, "unmapped")
         for raw in (

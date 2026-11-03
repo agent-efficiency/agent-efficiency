@@ -29,12 +29,15 @@ class GitMetaTests(unittest.TestCase):
         self.assertEqual(found.root, repo)
         self.assertEqual(found.branch, "main")
         self.assertEqual(found.head, git(repo, "rev-parse", "HEAD"))
-        self.assertEqual(found.remotes, (("origin", "git@git.example.com:Owner/App.git"),))
+        self.assertEqual(
+            found.remotes, (("origin", "git@git.example.com:Owner/App.git"),)
+        )
         self.assertEqual(found.identity(), "git.example.com/Owner/App")
 
     def test_worktree_shares_identity_and_has_its_own_branch(self) -> None:
         repo = make_repo(
-            self.base / "app", remotes={"origin": "https://git.example.com/owner/app.git"}
+            self.base / "app",
+            remotes={"origin": "https://git.example.com/owner/app.git"},
         )
         worktree = self.base / "app-feature"
         git(repo, "worktree", "add", "-q", "-b", "feature", str(worktree))
@@ -135,19 +138,25 @@ class GitMetaTests(unittest.TestCase):
 
     def test_remote_keyword_is_case_insensitive(self) -> None:
         self.assertEqual(
-            self.remotes_from('[Remote "origin"]\n\turl = https://git.example.com/o/a\n'),
+            self.remotes_from(
+                '[Remote "origin"]\n\turl = https://git.example.com/o/a\n'
+            ),
             (("origin", "https://git.example.com/o/a"),),
         )
 
     def test_url_key_is_case_insensitive(self) -> None:
         self.assertEqual(
-            self.remotes_from('[remote "origin"]\n\tURL = https://git.example.com/o/a\n'),
+            self.remotes_from(
+                '[remote "origin"]\n\tURL = https://git.example.com/o/a\n'
+            ),
             (("origin", "https://git.example.com/o/a"),),
         )
 
     def test_quoted_url_loses_its_quotes(self) -> None:
         self.assertEqual(
-            self.remotes_from('[remote "origin"]\n\turl = "https://git.example.com/o/a"\n'),
+            self.remotes_from(
+                '[remote "origin"]\n\turl = "https://git.example.com/o/a"\n'
+            ),
             (("origin", "https://git.example.com/o/a"),),
         )
 
