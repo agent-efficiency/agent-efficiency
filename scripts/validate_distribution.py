@@ -16,6 +16,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins" / "agent-efficiency"
 SELF = "scripts/validate_distribution.py"
+HOOK_CONFIG = ".pre-commit-config.yaml"
+HOOK_SOURCE_LINE = re.compile(r"^\s*- repo: https://github[.]com/\S+$", re.MULTILINE)
 SRC = PLUGIN / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -148,7 +150,11 @@ def validate_distribution(root: Path = ROOT) -> dict[str, Any]:
             re.IGNORECASE,
         ):
             references.append(f"{path.relative_to(root)}: personal email")
-        for url in re.findall(r"https://github[.]com/[^\s)\"\x60]+", text):
+        linked = text
+        if path.relative_to(root).as_posix() == HOOK_CONFIG:
+            # Pre-commit names each pinned hook source by its clone URL.
+            linked = HOOK_SOURCE_LINE.sub("", text)
+        for url in re.findall(r"https://github[.]com/[^\s)\"\x60]+", linked):
             if not url.startswith("https://github.com/agent-efficiency"):
                 references.append(f"{path.relative_to(root)}: external GitHub link")
         if path.suffix == ".json":
