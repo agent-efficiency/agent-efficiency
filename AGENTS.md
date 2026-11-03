@@ -41,6 +41,7 @@ Preserve these invariants:
 Run:
 
 ```bash
+pre-commit run --all-files
 python -m unittest discover -s tests -v
 python scripts/build_policy_pack.py --check
 python scripts/build_guidance_pack.py --check
@@ -50,3 +51,12 @@ python -m agent_efficiency doctor --json
 ```
 
 Also run host plugin validators when they are available.
+
+## Commits and pull requests
+
+- Write tests first, then the change.
+- Use Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`, `ci:`, `test:`,
+  `refactor:`, `style:`) for commit messages and pull request titles.
+- Keep one concern per pull request. Formatting-only changes go in their own
+  pull request.
+- Pull requests are squash merged after CI passes.
