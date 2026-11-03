@@ -1,7 +1,9 @@
 # See https://pre-commit.com for usage.
 # Every clone: pip install pre-commit, then pre-commit install --install-hooks
 # --hook-type pre-commit --hook-type commit-msg.
-# CI runs the same hooks, so a skipped local install cannot land on main.
+# CI runs the same hooks, checks every commit message in a pull request, and
+# scans the full history for secrets, so a skipped local install cannot land
+# on main.
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -14,7 +16,7 @@ repos:
       - id: check-json
       - id: check-toml
       - id: check-added-large-files
-        args: [--maxkb=500]
+        args: [--maxkb=500, --enforce-all]
       - id: detect-private-key
       - id: mixed-line-ending
         args: [--fix=lf]
