@@ -21,6 +21,7 @@ from tests.test_doctor import isolated_home
 
 FORBIDDEN_TERM = " ".join(("personal", "project"))
 HOME_PATH = "/".join(("", "home", "someone", ""))
+EXTERNAL_SITE = "/".join(("https:", "", "github.com", "example"))
 HOST_HOOK_FILES = {
     "claude": "./hooks/claude-hooks.json",
     "codex": "./hooks/codex-hooks.json",
@@ -164,6 +165,47 @@ class DistributionValidationTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn(
             f"docs/extra.md: {FORBIDDEN_TERM}", result["forbidden_references"]
+        )
+
+    def test_validation_accepts_pinned_hook_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = self._source_copy(temp)
+            (root / ".pre-commit-config.yaml").write_text(
+                "repos:\n"
+                f"  - repo: {EXTERNAL_SITE}/hooks\n"
+                "    rev: v1.0.0\n"
+                "    hooks:\n"
+                "      - id: example\n",
+                encoding="utf-8",
+            )
+            result = self._validate_copy(root)
+        self.assertTrue(result["ok"], result["errors"])
+
+    def test_validation_reports_other_links_in_hook_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = self._source_copy(temp)
+            (root / ".pre-commit-config.yaml").write_text(
+                f"# See {EXTERNAL_SITE}/notes\n"
+                "repos:\n"
+                f"  - repo: {EXTERNAL_SITE}/hooks\n"
+                "    rev: v1.0.0\n",
+                encoding="utf-8",
+            )
+            (root / "docs" / "extra.md").write_text(
+                f"repo: {EXTERNAL_SITE}/hooks\n", encoding="utf-8"
+            )
+            result = self._validate_copy(root)
+        self.assertFalse(result["ok"])
+        self.assertEqual(
+            sorted(
+                ref
+                for ref in result["forbidden_references"]
+                if ref.endswith("external GitHub link")
+            ),
+            [
+                ".pre-commit-config.yaml: external GitHub link",
+                "docs/extra.md: external GitHub link",
+            ],
         )
 
     def test_runtime_cli_excludes_maintainer_commands(self) -> None:
