@@ -22,7 +22,7 @@ State what this change does not prove or support.
 
 - [ ] Tests were written before the change and cover it.
 - [ ] `pre-commit run --all-files` passes.
-- [ ] The six checks in `AGENTS.md` pass locally.
+- [ ] The other checks in `AGENTS.md` pass locally.
 - [ ] `CHANGELOG.md` and affected docs are updated when behavior changes.
 - [ ] No prompts, code, command output, credentials, or personal data are
       stored by the change or included in fixtures.

@@ -31,9 +31,10 @@ pre-commit install --install-hooks --hook-type pre-commit --hook-type commit-msg
 
 The hooks check whitespace, YAML, JSON, and TOML files, run `ruff check` and
 `ruff format --check`, scan for secrets with gitleaks, lint workflow files with
-actionlint, and check commit messages. CI runs the same hooks, so a change that
-skips them locally still fails in the pull request. Some hooks download Go
-tools on first run.
+actionlint, and check commit messages. CI runs the same hooks, checks the
+message of every commit in the pull request, and scans the full history for
+secrets, so a change that skips them locally still fails in the pull request.
+Some hooks download Go tools on first run.
 
 Run the full local checks:
 
