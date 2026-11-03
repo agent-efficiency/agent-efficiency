@@ -25,11 +25,20 @@ cd agent-efficiency
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -e .
+python -m pip install pre-commit
+pre-commit install --install-hooks --hook-type pre-commit --hook-type commit-msg
 ```
+
+The hooks check whitespace, YAML, JSON, and TOML files, run `ruff check` and
+`ruff format --check`, scan for secrets with gitleaks, lint workflow files with
+actionlint, and check commit messages. CI runs the same hooks, so a change that
+skips them locally still fails in the pull request. Some hooks download Go
+tools on first run.
 
 Run the full local checks:
 
 ```bash
+pre-commit run --all-files
 python -m unittest discover -s tests -v
 python scripts/build_policy_pack.py --check
 python scripts/build_guidance_pack.py --check
@@ -40,7 +49,8 @@ python -m agent_efficiency doctor --json
 
 ## Pull requests
 
-Keep pull requests focused. Include:
+Keep pull requests focused on one concern. Put formatting-only changes in
+their own pull request. Fill in the pull request template. Include:
 
 - the problem and behavior change;
 - affected hosts;
@@ -52,6 +62,10 @@ Keep pull requests focused. Include:
 Do not include prompts, private repositories, source code from another
 project, production telemetry, credentials, or personal data in tests or issue
 reports.
+
+Every pull request needs passing CI (lint and the test matrix) before merge.
+Pull requests are squash merged, so the pull request title becomes the commit
+message on `main`. Write it as a Conventional Commit.
 
 ## Policy and guidance changes
 
@@ -77,5 +91,9 @@ rules, or make unsupported savings claims.
 
 ## Commit messages
 
-Use a short imperative summary. Explain user-visible behavior in the commit
-body when the reason is not clear from the diff.
+Use [Conventional Commits](https://www.conventionalcommits.org/): a type
+(`feat`, `fix`, `docs`, `chore`, `ci`, `test`, `refactor`, `style`), an
+optional scope, and a short imperative summary, for example
+`fix(hook): count each tool call once`. The commit-msg hook checks the format.
+Explain user-visible behavior in the commit body when the reason is not clear
+from the diff.
