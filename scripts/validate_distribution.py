@@ -17,7 +17,10 @@ ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins" / "agent-efficiency"
 SELF = "scripts/validate_distribution.py"
 HOOK_CONFIG = ".pre-commit-config.yaml"
-HOOK_SOURCE_LINE = re.compile(r"^\s*- repo: https://github[.]com/\S+$", re.MULTILINE)
+HOOK_SOURCE_LINE = re.compile(
+    r"^  - repo: https://github[.]com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+    re.MULTILINE,
+)
 SRC = PLUGIN / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))

@@ -192,7 +192,7 @@ class DistributionValidationTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (root / "docs" / "extra.md").write_text(
-                f"repo: {EXTERNAL_SITE}/hooks\n", encoding="utf-8"
+                f"  - repo: {EXTERNAL_SITE}/hooks\n", encoding="utf-8"
             )
             result = self._validate_copy(root)
         self.assertFalse(result["ok"])
