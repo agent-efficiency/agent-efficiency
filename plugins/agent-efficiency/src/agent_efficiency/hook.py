@@ -681,7 +681,7 @@ def _on_post_tool(
         count_subagent=facts.is_subagent,
         count_broad_scan=facts.is_broad_scan,
     )
-    if facts.is_validation:
+    if counts["resolved"] and facts.is_validation:
         store.record_intervention_outcome(
             session_id, turn_key, "check_failed" if failed else "check_passed"
         )
@@ -759,7 +759,7 @@ def _on_post_batch(
             count_subagent=facts.is_subagent,
             count_broad_scan=facts.is_broad_scan,
         )
-        if facts.is_validation:
+        if counts["resolved"] and facts.is_validation:
             store.record_intervention_outcome(
                 session_id, turn_key, "check_failed" if failed else "check_passed"
             )

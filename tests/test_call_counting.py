@@ -273,3 +273,93 @@ class HookCallCountingTests(unittest.TestCase):
                 """
             ).fetchall()
         self.assertNotIn(("failure_repeated",), outcomes)
+
+    def nudge_first(self) -> dict[str, object]:
+        """Emit a verify-change nudge so later check results attach to it."""
+
+        self.hook(
+            "PostToolUse",
+            tool_name="Edit",
+            tool_input={"file_path": "/work/project/src/app.py"},
+            tool_response={"success": True},
+        )
+        latest = self.store.latest_intervention("session-1")
+        self.assertIsNotNone(latest)
+        self.assertEqual(latest["policy_id"], "core.verify-change")
+        return latest
+
+    def check_outcomes(self, intervention_id: object, outcome: str) -> int:
+        with closing(sqlite3.connect(self.store.paths.database)) as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM intervention_outcomes "
+                "WHERE intervention_id = ? AND outcome = ?",
+                (intervention_id, outcome),
+            ).fetchone()
+        return int(row[0])
+
+    def test_failed_check_reported_twice_records_one_outcome(self) -> None:
+        nudge = self.nudge_first()
+        self.call(FAILING, failed=True)
+        self.assertEqual(self.check_outcomes(nudge["id"], "check_failed"), 1)
+
+    def test_passed_check_reported_twice_records_one_outcome(self) -> None:
+        nudge = self.nudge_first()
+        self.call(FAILING)
+        self.assertEqual(self.check_outcomes(nudge["id"], "check_passed"), 1)
+
+    def policy_outcomes(self, policy_id: str) -> list[str]:
+        with closing(sqlite3.connect(self.store.paths.database)) as conn:
+            rows = conn.execute(
+                """
+                SELECT o.outcome
+                  FROM intervention_outcomes o
+                  JOIN interventions i ON i.id = o.intervention_id
+                 WHERE i.policy_id = ?
+                """,
+                (policy_id,),
+            ).fetchall()
+        return [str(row[0]) for row in rows]
+
+    def test_failed_check_duplicate_is_not_credited_to_a_later_nudge(self) -> None:
+        self.call(FAILING, failed=True)
+        self.call(FAILING, failed=True)
+        # The second failure's own result emits the failure-loop nudge; its
+        # batch duplicate must not record the same check against that nudge.
+        self.assertNotIn(
+            "check_failed", self.policy_outcomes("core.break-failure-loop")
+        )
+
+    def test_passed_check_duplicate_is_not_credited_to_a_later_nudge(self) -> None:
+        passing = {"command": "pytest tests/unit"}
+        self.call(FAILING, failed=True)
+        # Two calls in parallel: the passing check finishes first, then the
+        # repeated failure emits the failure-loop nudge, then one batch reports both.
+        self.hook("PreToolUse", tool_name="Bash", tool_input=passing)
+        self.hook("PreToolUse", tool_name="Bash", tool_input=FAILING)
+        self.hook(
+            "PostToolUse",
+            tool_name="Bash",
+            tool_input=passing,
+            tool_response={"stdout": "ok"},
+        )
+        self.hook(
+            "PostToolUseFailure",
+            tool_name="Bash",
+            tool_input=FAILING,
+            error="failed",
+        )
+        self.assertIsNotNone(self.store.latest_intervention("session-1"))
+        self.hook(
+            "PostToolBatch",
+            tool_calls=[
+                {"tool_name": "Bash", "tool_input": passing, "tool_response": "ok"},
+                {
+                    "tool_name": "Bash",
+                    "tool_input": FAILING,
+                    "tool_response": {"is_error": True},
+                },
+            ],
+        )
+        self.assertNotIn(
+            "check_passed", self.policy_outcomes("core.break-failure-loop")
+        )
