@@ -1502,6 +1502,7 @@ class Store:
         signature: str | None = None,
         command_class: str | None = None,
         outcome: str | None = None,
+        resolves: bool | None = None,
     ) -> int:
         clauses = ["session_id = ?", "turn_key = ?"]
         params: list[Any] = [session_id, turn_key]
@@ -1514,6 +1515,9 @@ class Store:
             if value is not None:
                 clauses.append(f"{column} = ?")
                 params.append(value)
+        if resolves is not None:
+            clauses.append("resolves = ?")
+            params.append(int(resolves))
         query = f"SELECT COUNT(*) AS n FROM events WHERE {' AND '.join(clauses)}"
         with self.connect() as conn:
             row = conn.execute(query, params).fetchone()

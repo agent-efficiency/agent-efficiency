@@ -600,6 +600,7 @@ def _on_pre_tool(
         turn_key,
         signature=facts.signature,
         outcome="failure",
+        resolves=True,
     )
     identical_count = store.event_count(
         session_id,
