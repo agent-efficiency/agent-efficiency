@@ -136,3 +136,17 @@ class StoreResolutionTests(unittest.TestCase):
         self.assertEqual(counts["identical"], 2)
         self.assertEqual(counts["failures"], 0)
         self.assertEqual(counts["class_count"], 2)
+
+    def test_event_count_can_filter_resolved_reports(self) -> None:
+        self.start()
+        self.report("PostToolUseFailure", failed=True)
+        self.report("PostToolBatch", failed=True)
+        self.assertEqual(
+            self.store.event_count("s", "t", signature="sig", outcome="failure"), 2
+        )
+        self.assertEqual(
+            self.store.event_count(
+                "s", "t", signature="sig", outcome="failure", resolves=True
+            ),
+            1,
+        )
