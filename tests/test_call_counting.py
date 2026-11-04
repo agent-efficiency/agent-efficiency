@@ -6,7 +6,11 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 
+from agent_efficiency.hook import run_hook
 from agent_efficiency.store import SCHEMA_VERSION, Store
+
+
+CLAUDE_ENV = {"CLAUDE_PLUGIN_ROOT": "/plugin"}
 
 
 def _event_columns(database: Path) -> set[str]:
@@ -150,3 +154,122 @@ class StoreResolutionTests(unittest.TestCase):
             ),
             1,
         )
+
+
+SEARCH = {"command": "rg -n 'needle' src"}
+FAILING = {"command": "pytest tests/integration"}
+
+
+class HookCallCountingTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.store = Store(self.temp.name)
+        self.base = {
+            "session_id": "session-1",
+            "cwd": "/work/project",
+            "prompt_id": "turn-1",
+        }
+        self.hook(
+            "UserPromptSubmit",
+            prompt="Implement a substantial feature with tests and documentation.",
+        )
+
+    def hook(self, event: str, **extra: object) -> object:
+        return run_hook(
+            {**self.base, "hook_event_name": event, **extra},
+            store=self.store,
+            environ=CLAUDE_ENV,
+        )
+
+    def call(self, tool_input: dict[str, str], *, failed: bool = False) -> list[object]:
+        """One tool call as Claude Code reports it: pre, single result, batch."""
+
+        outputs = [self.hook("PreToolUse", tool_name="Bash", tool_input=tool_input)]
+        if failed:
+            outputs.append(
+                self.hook(
+                    "PostToolUseFailure",
+                    tool_name="Bash",
+                    tool_input=tool_input,
+                    error="failed",
+                )
+            )
+            batch_response: object = {"is_error": True}
+        else:
+            outputs.append(
+                self.hook(
+                    "PostToolUse",
+                    tool_name="Bash",
+                    tool_input=tool_input,
+                    tool_response={"stdout": "match"},
+                )
+            )
+            batch_response = "match"
+        outputs.append(
+            self.hook(
+                "PostToolBatch",
+                tool_calls=[
+                    {
+                        "tool_name": "Bash",
+                        "tool_input": tool_input,
+                        "tool_response": batch_response,
+                    }
+                ],
+            )
+        )
+        return outputs
+
+    def session(self) -> dict[str, object]:
+        return self.store.get_session("session-1")
+
+    @staticmethod
+    def mentions(outputs: list[object], phrase: str) -> int:
+        return sum(1 for output in outputs if phrase in repr(output).casefold())
+
+    def test_one_call_reported_three_times_counts_once(self) -> None:
+        outputs = self.call(SEARCH)
+        self.assertEqual(self.mentions(outputs, "same action"), 0)
+        self.assertEqual(self.session()["tool_count"], 1)
+        self.assertEqual(self.session()["repeated_action_count"], 0)
+
+    def test_different_calls_never_get_repeat_nudge(self) -> None:
+        outputs: list[object] = []
+        for command in ("rg -n a src", "rg -n b src", "rg -n c src"):
+            outputs += self.call({"command": command})
+        self.assertEqual(self.mentions(outputs, "same action"), 0)
+        self.assertEqual(self.session()["tool_count"], 3)
+
+    def test_third_identical_call_gets_exactly_one_repeat_nudge(self) -> None:
+        first = self.call(SEARCH)
+        second = self.call(SEARCH)
+        third = self.call(SEARCH)
+        self.assertEqual(self.mentions(first + second, "same action"), 0)
+        self.assertEqual(self.mentions(third, "same action"), 1)
+        self.assertEqual(self.session()["repeated_action_count"], 1)
+        self.assertEqual(self.session()["tool_count"], 3)
+
+    def test_one_failure_reported_twice_gets_no_failure_loop_nudge(self) -> None:
+        outputs = self.call(FAILING, failed=True)
+        self.assertEqual(self.mentions(outputs, "failed repeatedly"), 0)
+        self.assertEqual(self.session()["failure_count"], 1)
+
+    def test_second_identical_failure_gets_failure_loop_nudge(self) -> None:
+        self.call(FAILING, failed=True)
+        second = self.call(FAILING, failed=True)
+        self.assertGreaterEqual(self.mentions(second, "failed repeatedly"), 1)
+        self.assertEqual(self.session()["failure_count"], 2)
+
+    def test_duplicate_failure_report_is_not_a_repeat_after_the_nudge(self) -> None:
+        self.call(FAILING, failed=True)
+        self.call(FAILING, failed=True)
+        with closing(sqlite3.connect(self.store.paths.database)) as conn:
+            outcomes = conn.execute(
+                """
+                SELECT o.outcome
+                  FROM intervention_outcomes o
+                  JOIN interventions i ON i.id = o.intervention_id
+                 WHERE i.policy_id = 'core.break-failure-loop'
+                """
+            ).fetchall()
+        self.assertNotIn(("failure_repeated",), outcomes)
