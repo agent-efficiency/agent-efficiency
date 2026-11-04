@@ -23,6 +23,7 @@ MAX_NUDGES_PER_SESSION = 8
 MAX_KNOWLEDGE_ENVELOPES_PER_SESSION = 4
 MAX_KNOWLEDGE_CHARS_PER_ENVELOPE = 500
 MAX_KNOWLEDGE_CHARS_PER_SESSION = 2000
+SINGLE_RESULT_EVENTS = ("PostToolUse", "PostToolUseFailure")
 
 # The vault receipt is a closed schema. Every text column is a fixed code or a
 # digest, so a vault path, note id, title, hook, remote, or branch cannot be
@@ -1316,12 +1317,40 @@ class Store:
                     "WHERE session_id = ?",
                     (session_id,),
                 )
+            family = (
+                ("PostToolBatch",)
+                if event_name == "PostToolBatch"
+                else SINGLE_RESULT_EVENTS
+            )
+            placeholders = ", ".join("?" for _ in family)
+            prior = conn.execute(
+                f"""
+                SELECT
+                    SUM(CASE WHEN event_name = 'PreToolUse'
+                             THEN 1 ELSE 0 END) AS starts,
+                    SUM(CASE WHEN resolves = 1 THEN 1 ELSE 0 END) AS resolved,
+                    SUM(CASE WHEN event_name IN ({placeholders})
+                             THEN 1 ELSE 0 END) AS same_family
+                  FROM events
+                 WHERE session_id = ? AND turn_key = ? AND signature = ?
+                """,
+                (*family, session_id, turn_key, signature),
+            ).fetchone()
+            starts = int(prior["starts"] or 0)
+            resolved = int(prior["resolved"] or 0)
+            same_family = int(prior["same_family"] or 0)
+            # A family reports each call at most once, so its next report is a
+            # new call only while it has reported no more calls than are resolved.
+            resolves = same_family + 1 > resolved
+            # A resolved call with no start of its own was never counted at start.
+            new_call = resolves and starts <= resolved
             conn.execute(
                 """
                 INSERT INTO events(
                     session_id, turn_key, event_name, tool_name, command_class,
-                    signature, outcome, duration_ms, safe_details, created_at
-                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    signature, outcome, duration_ms, safe_details, created_at,
+                    resolves
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session_id,
@@ -1334,6 +1363,7 @@ class Store:
                     duration_ms,
                     details,
                     now,
+                    int(resolves),
                 ),
             )
             self._increment(
@@ -1342,12 +1372,12 @@ class Store:
                 "session_id",
                 session_id,
                 {
-                    "tool_count": 1,
-                    "failure_count": int(count_failure),
-                    "edit_count": int(count_edit),
-                    "validation_count": int(count_validation),
-                    "subagent_count": int(count_subagent),
-                    "broad_scan_count": int(count_broad_scan),
+                    "tool_count": int(new_call),
+                    "failure_count": int(resolves and count_failure),
+                    "edit_count": int(resolves and count_edit),
+                    "validation_count": int(resolves and count_validation),
+                    "subagent_count": int(new_call and count_subagent),
+                    "broad_scan_count": int(new_call and count_broad_scan),
                 },
             )
             self._increment_turn(
@@ -1355,43 +1385,79 @@ class Store:
                 session_id,
                 turn_key,
                 {
-                    "tool_count": 1,
-                    "failure_count": int(count_failure),
-                    "edit_count": int(count_edit),
-                    "code_edit_count": int(count_code_edit),
-                    "validation_count": int(count_validation),
-                    "broad_scan_count": int(count_broad_scan),
+                    "tool_count": int(new_call),
+                    "failure_count": int(resolves and count_failure),
+                    "edit_count": int(resolves and count_edit),
+                    "code_edit_count": int(resolves and count_code_edit),
+                    "validation_count": int(resolves and count_validation),
+                    "broad_scan_count": int(new_call and count_broad_scan),
                 },
             )
             conn.execute(
                 "UPDATE sessions SET updated_at = ? WHERE session_id = ?",
                 (now, session_id),
             )
-            row = conn.execute(
-                """
-                SELECT
-                    SUM(CASE WHEN signature = ? THEN 1 ELSE 0 END) AS identical,
-                    SUM(CASE WHEN signature = ? AND outcome = 'failure'
-                             THEN 1 ELSE 0 END) AS failures,
-                    SUM(CASE WHEN command_class = ? THEN 1 ELSE 0 END) AS class_count,
-                    SUM(CASE WHEN command_class = 'subagent'
-                             THEN 1 ELSE 0 END) AS subagents
-                  FROM events
-                 WHERE session_id = ? AND turn_key = ?
-                """,
-                (
-                    signature,
-                    signature,
-                    command_class,
-                    session_id,
-                    turn_key,
-                ),
-            ).fetchone()
+            counts = self._call_counts(
+                conn,
+                session_id,
+                turn_key,
+                signature=signature,
+                command_class=command_class,
+            )
+        return {**counts, "resolved": int(resolves)}
+
+    @staticmethod
+    def _call_counts(
+        conn: sqlite3.Connection,
+        session_id: str,
+        turn_key: str,
+        *,
+        signature: str,
+        command_class: str,
+    ) -> dict[str, int]:
+        """Count calls, not reports: a call is a start or a resolving report."""
+
+        row = conn.execute(
+            """
+            SELECT
+                SUM(CASE WHEN event_name = 'PreToolUse' AND signature = ?
+                         THEN 1 ELSE 0 END) AS signature_starts,
+                SUM(CASE WHEN resolves = 1 AND signature = ?
+                         THEN 1 ELSE 0 END) AS signature_resolved,
+                SUM(CASE WHEN resolves = 1 AND signature = ?
+                              AND outcome = 'failure'
+                         THEN 1 ELSE 0 END) AS failures,
+                SUM(CASE WHEN event_name = 'PreToolUse' AND command_class = ?
+                         THEN 1 ELSE 0 END) AS class_starts,
+                SUM(CASE WHEN resolves = 1 AND command_class = ?
+                         THEN 1 ELSE 0 END) AS class_resolved,
+                SUM(CASE WHEN event_name = 'PreToolUse'
+                              AND command_class = 'subagent'
+                         THEN 1 ELSE 0 END) AS subagent_starts,
+                SUM(CASE WHEN resolves = 1 AND command_class = 'subagent'
+                         THEN 1 ELSE 0 END) AS subagent_resolved
+              FROM events
+             WHERE session_id = ? AND turn_key = ?
+            """,
+            (
+                signature,
+                signature,
+                signature,
+                command_class,
+                command_class,
+                session_id,
+                turn_key,
+            ),
+        ).fetchone()
+
+        def value(name: str) -> int:
+            return int(row[name] or 0) if row else 0
+
         return {
-            "identical": int(row["identical"] or 0) if row else 0,
-            "failures": int(row["failures"] or 0) if row else 0,
-            "class_count": int(row["class_count"] or 0) if row else 0,
-            "subagents": int(row["subagents"] or 0) if row else 0,
+            "identical": max(value("signature_starts"), value("signature_resolved")),
+            "failures": value("failures"),
+            "class_count": max(value("class_starts"), value("class_resolved")),
+            "subagents": max(value("subagent_starts"), value("subagent_resolved")),
         }
 
     @staticmethod
@@ -1483,32 +1549,13 @@ class Store:
         command_class: str,
     ) -> dict[str, int]:
         with self.connect() as conn:
-            row = conn.execute(
-                """
-                SELECT
-                    SUM(CASE WHEN signature = ? THEN 1 ELSE 0 END) AS identical,
-                    SUM(CASE WHEN signature = ? AND outcome = 'failure'
-                             THEN 1 ELSE 0 END) AS failures,
-                    SUM(CASE WHEN command_class = ? THEN 1 ELSE 0 END) AS class_count,
-                    SUM(CASE WHEN command_class = 'subagent'
-                             THEN 1 ELSE 0 END) AS subagents
-                  FROM events
-                 WHERE session_id = ? AND turn_key = ?
-                """,
-                (
-                    signature,
-                    signature,
-                    command_class,
-                    session_id,
-                    turn_key,
-                ),
-            ).fetchone()
-        return {
-            "identical": int(row["identical"] or 0) if row else 0,
-            "failures": int(row["failures"] or 0) if row else 0,
-            "class_count": int(row["class_count"] or 0) if row else 0,
-            "subagents": int(row["subagents"] or 0) if row else 0,
-        }
+            return self._call_counts(
+                conn,
+                session_id,
+                turn_key,
+                signature=signature,
+                command_class=command_class,
+            )
 
     def mark_repeated_action(self, session_id: str, turn_key: str) -> None:
         with self.connect() as conn:

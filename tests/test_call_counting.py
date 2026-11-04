@@ -49,3 +49,90 @@ class SchemaEightTests(unittest.TestCase):
         with closing(sqlite3.connect(self.database)) as conn:
             rows = conn.execute("SELECT resolves FROM events").fetchall()
         self.assertEqual(rows, [(0,)])
+
+
+class StoreResolutionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.store = Store(self.temp.name)
+        self.store.ensure_session("s", host="claude", cwd="/work/p", model=None)
+        self.store.start_turn(
+            "s", "t", prompt_chars=0, task_type="unknown", risk="normal"
+        )
+
+    def start(self, signature: str = "sig") -> None:
+        self.store.record_event(
+            "s",
+            "t",
+            event_name="PreToolUse",
+            tool_name="Bash",
+            command_class="search",
+            signature=signature,
+            outcome="pending",
+            count_tool=True,
+        )
+
+    def report(
+        self, event_name: str, *, signature: str = "sig", failed: bool = False
+    ) -> dict[str, int]:
+        return self.store.record_tool_event(
+            "s",
+            "t",
+            event_name=event_name,
+            tool_name="Bash",
+            command_class="search",
+            signature=signature,
+            outcome="failure" if failed else "success",
+            duration_ms=None,
+            safe_details={},
+            count_failure=failed,
+            count_edit=False,
+            count_code_edit=False,
+            count_validation=False,
+            count_subagent=False,
+            count_broad_scan=False,
+        )
+
+    def test_single_result_resolves_and_batch_duplicate_does_not(self) -> None:
+        self.start()
+        single = self.report("PostToolUse")
+        batch = self.report("PostToolBatch")
+        self.assertEqual(single["resolved"], 1)
+        self.assertEqual(batch["resolved"], 0)
+        self.assertEqual(batch["identical"], 1)
+        self.assertEqual(self.store.get_session("s")["tool_count"], 1)
+
+    def test_batch_first_then_single_result_counts_once(self) -> None:
+        self.start()
+        batch = self.report("PostToolBatch")
+        single = self.report("PostToolUse")
+        self.assertEqual(batch["resolved"], 1)
+        self.assertEqual(single["resolved"], 0)
+        self.assertEqual(self.store.get_session("s")["tool_count"], 1)
+
+    def test_batch_only_host_counts_each_call_as_new(self) -> None:
+        for _ in range(3):
+            counts = self.report("PostToolBatch")
+        self.assertEqual(counts["resolved"], 1)
+        self.assertEqual(counts["identical"], 3)
+        self.assertEqual(self.store.get_session("s")["tool_count"], 3)
+
+    def test_failure_reported_twice_counts_once(self) -> None:
+        self.start()
+        self.report("PostToolUseFailure", failed=True)
+        counts = self.report("PostToolBatch", failed=True)
+        self.assertEqual(counts["failures"], 1)
+        self.assertEqual(self.store.get_session("s")["failure_count"], 1)
+
+    def test_runtime_counts_use_resolved_calls(self) -> None:
+        for _ in range(2):
+            self.start()
+            self.report("PostToolUse")
+            self.report("PostToolBatch")
+        counts = self.store.runtime_counts(
+            "s", "t", signature="sig", command_class="search"
+        )
+        self.assertEqual(counts["identical"], 2)
+        self.assertEqual(counts["failures"], 0)
+        self.assertEqual(counts["class_count"], 2)
