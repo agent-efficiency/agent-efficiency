@@ -24,7 +24,7 @@ from agent_efficiency.experiments import (
 )
 from agent_efficiency.hook import run_hook
 from agent_efficiency.report import build_report
-from agent_efficiency.store import Store
+from agent_efficiency.store import SCHEMA_VERSION, Store
 
 
 CLAUDE_ENV = {"CLAUDE_PLUGIN_ROOT": "/plugin"}
@@ -623,7 +623,7 @@ class ExperimentTests(unittest.TestCase):
         migrated = Store(self.temp.name)
         self.assertIsNone(get_enrollment(migrated, "existing-session"))
         self.assertIsNotNone(migrated.get_session("existing-session"))
-        self.assertEqual(migrated.get_setting("schema_version"), "7")
+        self.assertEqual(migrated.get_setting("schema_version"), SCHEMA_VERSION)
 
     def test_cli_enrollment_outcome_and_evaluation_are_machine_readable(self) -> None:
         self.store.ensure_session(
