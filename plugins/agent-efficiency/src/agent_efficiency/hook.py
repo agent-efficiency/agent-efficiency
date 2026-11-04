@@ -685,7 +685,7 @@ def _on_post_tool(
         store.record_intervention_outcome(
             session_id, turn_key, "check_failed" if failed else "check_passed"
         )
-    if counts["failures"] >= 2:
+    if counts["resolved"] and counts["failures"] >= 2:
         store.record_intervention_outcome(session_id, turn_key, "failure_repeated")
     if mode not in {"advise", "guard"}:
         return None
@@ -707,6 +707,8 @@ def _on_post_tool(
         nudge = PolicyPack.load(store.paths.root).get("core.verify-change")
         if nudge and store.record_nudge(session_id, turn_key, nudge.policy_id):
             return _guidance_output(store, session_id, turn_key, host, event, nudge)
+    if not counts["resolved"]:
+        return None
     policy_id = _runtime_policy_id(store, session_id, turn_key, facts, counts=counts)
     if not policy_id:
         return None
@@ -761,9 +763,9 @@ def _on_post_batch(
             store.record_intervention_outcome(
                 session_id, turn_key, "check_failed" if failed else "check_passed"
             )
-        if counts["failures"] >= 2:
+        if counts["resolved"] and counts["failures"] >= 2:
             store.record_intervention_outcome(session_id, turn_key, "failure_repeated")
-        if mode in {"advise", "guard"}:
+        if mode in {"advise", "guard"} and counts["resolved"]:
             policy_id = _runtime_policy_id(
                 store, session_id, turn_key, facts, counts=counts
             )
