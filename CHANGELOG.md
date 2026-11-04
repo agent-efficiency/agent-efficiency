@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Count each tool call once when a host reports it more than once. Claude Code
+  reports a call before it runs, after it finishes, and again in a batch; the
+  repeated-action and failure-loop guidance now fire on real repeats only.
+  Older records keep their previous counts.
+
 ## 0.2.1 - 2026-09-30
 
 ### One data folder for every host
