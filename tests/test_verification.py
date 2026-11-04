@@ -14,7 +14,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from agent_efficiency.cli import main
-from agent_efficiency.store import Store, project_identity
+from agent_efficiency.store import SCHEMA_VERSION, Store, project_identity
 from agent_efficiency.verification.config import load_project_config
 from agent_efficiency.verification.receipts import receipt_state
 from agent_efficiency.verification.runner import run_checks
@@ -176,9 +176,9 @@ command = ["python", "-V"]
             conn.execute("UPDATE settings SET value = '3' WHERE key = 'schema_version'")
         status = self.store.migration_status()
         self.assertTrue(status["migration_required"])
-        self.assertEqual(status["target_schema"], "7")
+        self.assertEqual(status["target_schema"], SCHEMA_VERSION)
         self.store.ensure_current_schema()
-        self.assertEqual(self.store.get_setting("schema_version"), "7")
+        self.assertEqual(self.store.get_setting("schema_version"), SCHEMA_VERSION)
         self.assertEqual(
             self.store.get_session("session-1")["evidence_version"],
             "legacy-observation",

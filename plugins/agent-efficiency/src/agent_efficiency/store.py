@@ -16,7 +16,7 @@ from agent_efficiency.folder_lock import folder_lock
 from agent_efficiency.paths import RuntimePaths, create_private_file
 
 
-SCHEMA_VERSION = "7"
+SCHEMA_VERSION = "8"
 INTERVENTION_EVENT_WINDOW = 8
 MAX_NUDGES_PER_TURN = 3
 MAX_NUDGES_PER_SESSION = 8
@@ -274,6 +274,7 @@ class Store:
                     duration_ms INTEGER,
                     safe_details TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT NOT NULL,
+                    resolves INTEGER NOT NULL DEFAULT 0 CHECK(resolves IN (0, 1)),
                     FOREIGN KEY(session_id) REFERENCES sessions(session_id)
                 );
 
@@ -569,7 +570,7 @@ class Store:
                 "SELECT value FROM settings WHERE key = 'schema_version'"
             ).fetchone()
             version = str(row["value"]) if row else "1"
-            if version not in {"1", "2", "3", "4", "5", "6", SCHEMA_VERSION}:
+            if version not in {"1", "2", "3", "4", "5", "6", "7", SCHEMA_VERSION}:
                 raise ValueError(f"unsupported data schema version: {version}")
             if version != SCHEMA_VERSION:
                 backup_path = self.paths.database.with_name(
@@ -891,6 +892,15 @@ class Store:
                     "'current', 'stale', 'missing', 'failed', 'blocked', "
                     "'inconclusive'))"
                 )
+            event_columns = {
+                str(column["name"])
+                for column in conn.execute("PRAGMA table_info(events)")
+            }
+            if "resolves" not in event_columns:
+                conn.execute(
+                    "ALTER TABLE events ADD COLUMN resolves INTEGER NOT NULL "
+                    "DEFAULT 0 CHECK(resolves IN (0, 1))"
+                )
             conn.execute(
                 "INSERT INTO settings(key, value) VALUES('schema_version', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -907,7 +917,7 @@ class Store:
                 "SELECT value FROM settings WHERE key = 'schema_version'"
             ).fetchone()
         version = str(row["value"]) if row else "1"
-        supported = version in {"1", "2", "3", "4", "5", "6", SCHEMA_VERSION}
+        supported = version in {"1", "2", "3", "4", "5", "6", "7", SCHEMA_VERSION}
         backup = self.paths.database.with_name(
             f"{self.paths.database.name}.schema-{version}.bak"
         )

@@ -25,7 +25,7 @@ from agent_efficiency.cli import main
 from agent_efficiency.hook import run_hook
 from agent_efficiency.models import TaskFacts
 from agent_efficiency.policy import classify_task
-from agent_efficiency.store import Store
+from agent_efficiency.store import SCHEMA_VERSION, Store
 
 
 CLAUDE_ENV = {"CLAUDE_PLUGIN_ROOT": "/plugin"}
@@ -383,7 +383,7 @@ class CapabilityRetrievalTests(unittest.TestCase):
                     "SELECT name FROM sqlite_master WHERE type = 'table'"
                 )
             }
-        self.assertEqual(version, "7")
+        self.assertEqual(version, SCHEMA_VERSION)
         self.assertIn("knowledge_receipts", tables)
         self.assertIn("session_capability_packs", tables)
         self.assertIn("interventions", tables)

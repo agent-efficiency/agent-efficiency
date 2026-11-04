@@ -6,7 +6,7 @@ import unittest
 from contextlib import closing
 
 from agent_efficiency.report import build_report, format_report
-from agent_efficiency.store import Store
+from agent_efficiency.store import SCHEMA_VERSION, Store
 
 
 class VaultReceiptTests(unittest.TestCase):
@@ -164,7 +164,7 @@ class VaultReceiptTests(unittest.TestCase):
             conn.commit()
         migrated = Store(self.temp.name)
         migrated.ensure_current_schema()
-        self.assertEqual(migrated.get_setting("schema_version"), "7")
+        self.assertEqual(migrated.get_setting("schema_version"), SCHEMA_VERSION)
         backup = migrated.paths.database.with_name(
             f"{migrated.paths.database.name}.schema-6.bak"
         )
