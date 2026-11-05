@@ -8,6 +8,7 @@ import json
 import os
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -1271,10 +1272,31 @@ def _codex_installs(codex_home: Path) -> dict[str, Any]:
 
 
 def _cursor_installs(cursor_home: Path) -> dict[str, Any]:
-    local = cursor_home / "plugins" / "local" / "agent-efficiency"
+    folder = cursor_home / "plugins" / "local"
+    local = folder / "agent-efficiency"
     if not local.exists() and not local.is_symlink():
         return _host_summary([])
     status = _plugin_folder_status(local, "cursor", probe=True)
+    if local.is_symlink():
+        # Cursor loads a link in its local plugin folder only when the link
+        # resolves to a folder inside that folder.
+        try:
+            target = local.resolve(strict=True)
+            inside = folder.resolve() in target.parents
+        except (OSError, RuntimeError):
+            target, inside = local, False
+        if not inside:
+            status = {
+                **status,
+                "ready": False,
+                "not_ready_reasons": [
+                    f"{local} is a link to {target}. Cursor skips a link to a "
+                    f"folder outside {folder}, so it does not load this plugin. "
+                    f"Replace the link with a copy: rm {shlex.quote(str(local))} "
+                    f"&& cp -R {shlex.quote(str(target))} "
+                    f"{shlex.quote(str(local))}"
+                ],
+            }
     return _host_summary(
         [
             {
@@ -1375,7 +1397,8 @@ def _doctor(
             f"{hook_path} is Python {hook_version}; hooks need Python "
             f"{minimum_python} or newer. Put a newer python3 on PATH."
         )
-    data_dir_private = is_private(root) and is_private(database)
+    readable = _readable_by_others(root)
+    data_dir_private = not readable
     checks: dict[str, Any] = {
         "runtime_version": __version__,
         "python": platform.python_version(),
@@ -1385,15 +1408,8 @@ def _doctor(
         "data_dir": str(root),
         "data_dir_writable": os.access(root, os.W_OK),
         "data_dir_private": data_dir_private,
-        "data_dir_permissions": (
-            "only you can read the data folder"
-            if data_dir_private
-            else (
-                "other users can read the data folder. Agent Efficiency does "
-                "not change the mode of a folder it did not create. To make it "
-                f"private, run: chmod -R go-rwx {root}"
-            )
-        ),
+        "data_dir_readable_by_others": readable,
+        "data_dir_permissions": _permissions_message(root, readable),
         "data_copy": copy_error,
         "unused_data_dirs": unused_host_stores(root, os.environ, copy_error=copy_error),
         "database": str(database),
@@ -1437,6 +1453,89 @@ def _doctor(
         and checks["installed_hosts_ready"]
     )
     return checks
+
+
+def _readable_by_others(root: Path) -> list[str]:
+    """Return what in the data folder other users may be able to read.
+
+    ``"."`` stands for the folder itself. Every other entry is a path relative
+    to it. A link is never trusted: a link to a file outside the folder is
+    judged by that file's mode and listed as ``"name -> target"``. A link to a
+    place inside the folder is skipped, because that place is checked itself.
+    """
+
+    entries: list[str] = []
+    resolved_root = root.resolve()
+    for folder, folders, files in os.walk(root):
+        base = Path(folder)
+        for name in sorted(folders) + sorted(files):
+            path = base / name
+            relative = path.relative_to(root).as_posix()
+            try:
+                is_link = path.is_symlink()
+            except OSError:
+                continue
+            if is_link:
+                try:
+                    target = path.resolve(strict=True)
+                except (OSError, RuntimeError):
+                    continue
+                if target == resolved_root or resolved_root in target.parents:
+                    continue
+                if not is_private(target):
+                    entries.append(f"{relative} -> {target}")
+            elif not is_private(path):
+                entries.append(relative)
+    return ([] if is_private(root) else ["."]) + sorted(entries)
+
+
+# How many entries the permissions message names before it counts the rest.
+PERMISSIONS_NAMED = 5
+
+
+def _named(entries: list[str]) -> str:
+    named = ", ".join(entries[:PERMISSIONS_NAMED])
+    if len(entries) > PERMISSIONS_NAMED:
+        named += f", and {len(entries) - PERMISSIONS_NAMED} more"
+    return named
+
+
+def _permissions_message(root: Path, readable: list[str]) -> str:
+    if not readable:
+        return "only you can read the data folder"
+    links = [item for item in readable if " -> " in item]
+    loose = [item for item in readable if item != "." and " -> " not in item]
+    parts: list[str] = []
+    if "." in readable:
+        parts.append(
+            "other users can open the data folder, so they can read the files "
+            "in it that are not private."
+        )
+        if loose:
+            parts.append(f"These entries are not private: {_named(loose)}.")
+    elif loose:
+        parts.append(
+            "the data folder is private, so other users cannot reach the files "
+            "in it, but these entries are not private themselves and would be "
+            f"readable anywhere else: {_named(loose)}."
+        )
+    if links:
+        parts.append(
+            "These entries are links to files outside the data folder that "
+            f"other users can read: {_named(links)}."
+        )
+    parts.append(
+        "Agent Efficiency does not change the mode of a folder or file it did "
+        "not create."
+    )
+    fixes = []
+    if "." in readable or loose:
+        fixes.append(f"chmod -R go-rwx {shlex.quote(str(root))}")
+    fixes.extend(
+        f"chmod go-rwx {shlex.quote(item.split(' -> ', 1)[1])}" for item in links
+    )
+    parts.append("To make it all private, run: " + "; ".join(fixes))
+    return " ".join(parts)
 
 
 def _hook_python() -> tuple[str | None, str | None]:
