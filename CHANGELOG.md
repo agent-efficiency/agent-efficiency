@@ -8,6 +8,9 @@
   reports a call before it runs, after it finishes, and again in a batch; the
   repeated-action and failure-loop guidance now fire on real repeats only.
   Older records keep their previous counts.
+- Keep separate outcomes for identical calls whose result reports arrive in
+  different orders. Use a digest of the host call identifier when supplied;
+  otherwise match successful and failed reports separately.
 
 ## 0.2.1 - 2026-09-30
 

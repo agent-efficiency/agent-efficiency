@@ -4,6 +4,7 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import closing
+from itertools import permutations
 from pathlib import Path
 
 from agent_efficiency.hook import run_hook
@@ -154,6 +155,23 @@ class StoreResolutionTests(unittest.TestCase):
             ),
             1,
         )
+
+    def test_reordered_reports_without_ids_preserve_failures(self) -> None:
+        reports = (
+            ("PostToolUse", False),
+            ("PostToolUseFailure", True),
+            ("PostToolBatch", False),
+            ("PostToolBatch", True),
+        )
+        for index, order in enumerate(permutations(reports)):
+            signature = f"order-{index}"
+            with self.subTest(order=order):
+                self.start(signature)
+                self.start(signature)
+                for event, failed in order:
+                    counts = self.report(event, signature=signature, failed=failed)
+                self.assertEqual(counts["identical"], 2)
+                self.assertEqual(counts["failures"], 1)
 
 
 SEARCH = {"command": "rg -n 'needle' src"}
@@ -363,3 +381,115 @@ class HookCallCountingTests(unittest.TestCase):
         self.assertNotIn(
             "check_passed", self.policy_outcomes("core.break-failure-loop")
         )
+
+    def test_named_calls_can_use_different_result_families(self) -> None:
+        for call_id in ("call-a", "call-b"):
+            self.hook(
+                "PreToolUse",
+                tool_name="Bash",
+                tool_input=FAILING,
+                tool_use_id=call_id,
+            )
+        self.hook(
+            "PostToolUse",
+            tool_name="Bash",
+            tool_input=FAILING,
+            tool_use_id="call-a",
+            tool_response="ok",
+        )
+        self.hook(
+            "PostToolBatch",
+            tool_calls=[
+                {
+                    "tool_name": "Bash",
+                    "tool_input": FAILING,
+                    "tool_use_id": "call-b",
+                    "tool_response": {"is_error": True},
+                }
+            ],
+        )
+        self.assertEqual(self.session()["tool_count"], 2)
+        self.assertEqual(self.session()["failure_count"], 1)
+        self.assertEqual(self.session()["validation_count"], 1)
+
+    def test_replayed_named_result_records_one_check_outcome(self) -> None:
+        nudge = self.nudge_first()
+        for _ in range(2):
+            self.hook(
+                "PostToolUse",
+                tool_name="Bash",
+                tool_input=FAILING,
+                tool_use_id="private-call-identifier-6839",
+                tool_response="ok",
+            )
+        self.assertEqual(self.session()["tool_count"], 2)
+        self.assertEqual(self.session()["validation_count"], 1)
+        self.assertEqual(self.check_outcomes(nudge["id"], "check_passed"), 1)
+        with self.store.connect() as conn:
+            dump = "\n".join(conn.iterdump())
+        self.assertNotIn("private-call-identifier-6839", dump)
+
+    def test_reordered_named_results_preserve_failure(self) -> None:
+        for call_id in ("call-a", "call-b"):
+            self.hook(
+                "PreToolUse",
+                tool_name="Bash",
+                tool_input=FAILING,
+                tool_use_id=call_id,
+            )
+        self.hook(
+            "PostToolUse",
+            tool_name="Bash",
+            tool_input=FAILING,
+            tool_use_id="call-b",
+            tool_response="ok",
+        )
+        self.hook(
+            "PostToolBatch",
+            tool_calls=[
+                {
+                    "tool_name": "Bash",
+                    "tool_input": FAILING,
+                    "tool_use_id": "call-a",
+                    "tool_response": {"is_error": True},
+                },
+                {
+                    "tool_name": "Bash",
+                    "tool_input": FAILING,
+                    "tool_use_id": "call-b",
+                    "tool_response": "ok",
+                },
+            ],
+        )
+        self.hook(
+            "PostToolUseFailure",
+            tool_name="Bash",
+            tool_input=FAILING,
+            tool_use_id="call-a",
+            error="failed",
+        )
+        self.assertEqual(self.session()["tool_count"], 2)
+        self.assertEqual(self.session()["failure_count"], 1)
+        self.assertEqual(self.session()["validation_count"], 1)
+
+    def test_batch_without_identifier_matches_a_named_result(self) -> None:
+        self.hook(
+            "PostToolBatch",
+            tool_calls=[
+                {
+                    "tool_name": "Bash",
+                    "tool_input": FAILING,
+                    "tool_response": {"is_error": True},
+                }
+            ],
+        )
+        for _ in range(2):
+            self.hook(
+                "PostToolUseFailure",
+                tool_name="Bash",
+                tool_input=FAILING,
+                tool_use_id="call-a",
+                error="failed",
+            )
+        self.assertEqual(self.session()["tool_count"], 1)
+        self.assertEqual(self.session()["failure_count"], 1)
