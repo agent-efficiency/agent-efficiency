@@ -36,36 +36,41 @@ The tagged install examples target version 0.2.2 and require that release to
 be published. To review an unreleased checkout, use the
 [local development steps](docs/development.md#try-your-checkout-in-a-host).
 
-You need Python 3.11 or newer as `python3` on your PATH, and
-[pipx](https://pipx.pypa.io/) for the terminal command.
+You need Claude Code, Python 3.11 or newer as `python3` on your PATH, and
+[pipx](https://pipx.pypa.io/) or uv for the terminal command.
 
-1. Install the plugin:
-
-   ```bash
-   claude plugin marketplace add agent-efficiency/agent-efficiency
-   claude plugin install agent-efficiency@agent-efficiency
-   ```
-
-2. Install the `agent-efficiency` command for your terminal, then check the
-   setup:
+1. Clone the release and run the installer. It installs the plugin and the
+   `agent-efficiency` command, then checks the setup:
 
    ```bash
-   pipx install git+https://github.com/agent-efficiency/agent-efficiency@v0.2.2
-   agent-efficiency doctor
+   git clone --branch v0.2.2 https://github.com/agent-efficiency/agent-efficiency.git
+   cd agent-efficiency
+   bash install.sh
    ```
 
-   A ready setup prints `OK` on the first line and `ready` for Claude Code:
+   A ready setup ends like this:
 
    ```text
    Agent Efficiency doctor: OK
    ...
    Claude Code: ready, 0.2.2 (user scope) at /home/you/.claude/plugins/cache/agent-efficiency/agent-efficiency/0.2.2
+   ...
+   Run /reload-plugins in any open Claude Code session, or start a new session.
    ```
 
-   If it prints `FAILED`, the lines below it say what is wrong and how to fix
-   it. See [Troubleshooting](docs/troubleshooting.md).
+   If doctor prints `FAILED`, the lines below it say what is wrong and how to
+   fix it. See [Troubleshooting](docs/troubleshooting.md).
 
-3. Start a new Claude Code session. To see what it recorded, type this as an
+   The same steps by hand, without the clone:
+
+   ```bash
+   claude plugin marketplace add agent-efficiency/agent-efficiency
+   claude plugin install agent-efficiency@agent-efficiency
+   pipx install git+https://github.com/agent-efficiency/agent-efficiency@v0.2.2
+   agent-efficiency doctor
+   ```
+
+2. Start a new Claude Code session. To see what it recorded, type this as an
    ordinary chat message (it is not a slash command):
 
    ```text
@@ -75,12 +80,9 @@ You need Python 3.11 or newer as `python3` on your PATH, and
    The plugin answers with one line, such as
    `Agent Efficiency: advise | turns 0 | tools 0 | failures 0 | nudges 0 | cost host metric unavailable.`
 
-Other hosts:
-
-- **Codex:** two `codex plugin` commands and one approval in `/hooks`. See
-  [Install for Codex](docs/install.md#codex).
-- **Cursor:** a local plugin folder only, for now. See
-  [Install for Cursor](docs/install.md#cursor).
+**Codex** needs two `codex plugin` commands and one approval in `/hooks`.
+**Cursor** works from a local plugin folder only, for now. See
+[Install](docs/install.md#codex) for both.
 
 ## Documentation
 
@@ -100,9 +102,9 @@ Other hosts:
 ## Privacy
 
 All data stays in one local folder, `~/.local/share/agent-efficiency` by
-default, created so that only you can read it. It holds counts, states, times, and one-way
-fingerprints, never your prompts, code, or output. See
-[Privacy](docs/privacy.md) for the full list.
+default, created so that only you can read it. It holds counts, states, times,
+and one-way fingerprints, never your prompts, code, or output. See
+[Privacy](docs/privacy.md).
 
 ## Contributing, security, and license
 

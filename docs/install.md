@@ -20,7 +20,58 @@ Check your Python:
 python3 --version
 ```
 
-## Claude Code
+## The installer for Claude Code
+
+`install.sh` at the root of the repository does every Claude Code step below
+in one run: the plugin, the terminal command, optional vault trees, and a
+final `doctor` check. It needs Claude Code, Python 3.11 or newer, and pipx or
+uv.
+
+```bash
+git clone --branch v0.2.2 https://github.com/agent-efficiency/agent-efficiency.git
+cd agent-efficiency
+bash install.sh
+```
+
+It runs these steps, each under its own heading:
+
+1. **Checks** that `claude` and `python3` 3.11 or newer are on PATH, and that
+   each `--vault` folder is a vault tree. It stops with a plain message if
+   not, before it changes anything.
+2. **Claude Code settings.** It copies `settings.json` (in
+   `$CLAUDE_CONFIG_DIR`, or `~/.claude`) to a backup file next to it, and
+   creates the file if it is missing. It removes an `agent-efficiency`
+   marketplace entry that points at a folder that no longer exists.
+3. **The plugin.** It removes the `agent-efficiency` marketplace if it is
+   there, adds it again, and installs the plugin for your user. The data
+   that older releases kept in Claude Code's plugin data folder is kept.
+4. **The command**, with `pipx install --force`, or with
+   `uvx --from pipx pipx` when pipx is missing.
+5. **Vault trees**, if you name any: it updates each tree's git hooks and
+   registers it.
+6. **`agent-efficiency doctor`**, then a reminder to run `/reload-plugins` in
+   open sessions.
+
+Options:
+
+| Option | What it does |
+| --- | --- |
+| `--data-dir DIR` | Keeps the data in DIR. Creates DIR with mode 0700 and sets `env.AGENT_EFFICIENCY_DATA` in the Claude Code settings. |
+| `--vault PATH` | Registers a vault tree and updates its git hooks. Repeat it for each tree. Create trees first; see [Vault](vault.md). |
+| `--ref TAG` | Installs both the plugin and command from the same release tag. The default is `v0.2.2`. |
+| `--no-command` | Skips the command install. An `agent-efficiency` command must already be on PATH. |
+
+For example, with your own data folder and two vault trees:
+
+```bash
+bash install.sh --data-dir ~/ae-data --vault ~/notes/vault-core --vault ~/notes/vault-work
+```
+
+The installer is safe to run again. Each run makes a new settings backup and
+brings the plugin, the command, and the vault hooks up to date. It does not
+set up Codex or Cursor; follow the steps below for those.
+
+## Claude Code by hand
 
 ```bash
 claude plugin marketplace add agent-efficiency/agent-efficiency
@@ -164,7 +215,16 @@ something after the upgrade.
 
 ### Claude Code
 
-If you added the marketplace without a tag:
+If you used the installer, check out the new release tag in your clone (here
+`~/agent-efficiency`) and run it again:
+
+```bash
+git -C ~/agent-efficiency fetch --tags
+git -C ~/agent-efficiency checkout v0.2.2
+bash ~/agent-efficiency/install.sh
+```
+
+If you added the marketplace by hand without a tag:
 
 ```bash
 claude plugin marketplace update agent-efficiency

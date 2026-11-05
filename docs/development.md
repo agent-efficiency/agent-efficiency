@@ -48,6 +48,13 @@ claude plugin marketplace add /absolute/path/to/agent-efficiency
 claude plugin install agent-efficiency@agent-efficiency
 ```
 
+Or run the installer against your checkout. `--source` is for development
+only: it installs both the plugin and the command from the folder you name.
+
+```bash
+bash install.sh --source "$PWD"
+```
+
 For Codex, use the same path with `codex plugin marketplace add`. For Cursor,
 copy the plugin folder as shown in [Install for Cursor](install.md#cursor).
 
