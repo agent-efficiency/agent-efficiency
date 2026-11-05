@@ -64,7 +64,7 @@ You need Claude Code, Python 3.11 or newer as `python3` on your PATH, and
    The same steps by hand, without the clone:
 
    ```bash
-   claude plugin marketplace add agent-efficiency/agent-efficiency
+   claude plugin marketplace add "agent-efficiency/agent-efficiency#v0.2.2"
    claude plugin install agent-efficiency@agent-efficiency
    pipx install git+https://github.com/agent-efficiency/agent-efficiency@v0.2.2
    agent-efficiency doctor
