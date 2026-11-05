@@ -33,7 +33,9 @@ class ClaudeAdapter(BaseAdapter):
         "PostToolUseFailure": ("add_context",),
         "PostToolBatch": ("add_context",),
         "PreCompact": ("add_context",),
-        "PostCompact": ("add_context",),
+        # Claude Code and Codex take no context from PostCompact. Context after
+        # a compaction goes out at the session start whose source is compact.
+        "PostCompact": (),
         "SubagentStop": ("continue_turn",),
         "Stop": ("continue_turn",),
     }

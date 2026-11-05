@@ -906,12 +906,14 @@ def _deferred_vault(
 def _compact_vault(
     store: Store, session_id: str, host: str, cwd: str, mode: str
 ) -> dict[str, Any] | None:
-    """Deliver vault context after a compaction if no event has done it yet.
+    """Deliver vault context at ``PostCompact`` on a host that accepts it there.
 
-    Some hosts send a session start after a compaction and some send only
-    ``PostCompact``. Whichever arrives first delivers.
+    A host that takes no context from ``PostCompact`` leaves the compaction
+    due, so its compact session start or next tool result delivers instead.
     """
 
+    if "add_context" not in adapter_for(host).capabilities.get("PostCompact", ()):
+        return None
     if not _vault_registered(store):
         return None
     try:

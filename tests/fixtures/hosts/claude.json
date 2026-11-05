@@ -3,9 +3,7 @@
     {
       "canonical_effect": "none",
       "expected_canonical_event": "context.compacted",
-      "expected_capabilities": [
-        "add_context"
-      ],
+      "expected_capabilities": [],
       "expected_native_output": null,
       "expected_safe_facts": {},
       "native_event": "PostCompact",

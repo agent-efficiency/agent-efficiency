@@ -676,21 +676,39 @@ class SessionStartDeliveryTests(VaultDeliveryBase):
             [("new", "delivered", None), ("compact", "delivered", None)],
         )
 
-    def test_compaction_delivers_once_when_post_compact_comes_first(self) -> None:
+    def test_post_compact_does_not_use_up_the_compaction(self) -> None:
+        """Neither Claude Code nor Codex can add context from PostCompact.
+
+        A PostCompact that arrives before the compact session start must leave
+        the compaction due, so the session start can deliver.
+        """
+
+        for session, env in (("s-claude", None), ("s-codex", CODEX_ENV)):
+            with self.subTest(session=session):
+                kwargs = {"session": session, **({"env": env} if env else {})}
+                self.claude("SessionStart", source="startup", **kwargs)
+                self.claude("PreCompact", **kwargs)
+                self.assertIsNone(self.claude("PostCompact", **kwargs))
+                self.assertTrue(self.store.vault_compaction_due(session))
+                output = self.claude("SessionStart", source="compact", **kwargs)
+                text = output["hookSpecificOutput"]["additionalContext"]
+                self.assertTrue(text.startswith(f"{HEADER}\n{REPLACES}\n\n"))
+                self.assertIn(HEAD, text)
+                self.assertEqual(
+                    self.receipts(session),
+                    [("new", "delivered", None), ("compact", "delivered", None)],
+                )
+
+    def test_post_compact_with_a_broken_vault_leaves_the_notice_due(self) -> None:
         self.claude("SessionStart", source="startup")
         self.claude("PreCompact")
-        output = self.claude("PostCompact")
-        context = output["hookSpecificOutput"]
-        self.assertEqual(context["hookEventName"], "PostCompact")
-        self.assertIn(HEAD, context["additionalContext"])
-        self.assertIsNone(self.claude("SessionStart", source="compact"))
-        self.assertEqual(
-            self.receipts("s-claude"),
-            [
-                ("new", "delivered", None),
-                ("compact", "delivered", None),
-                ("compact", "skipped", "unchanged"),
-            ],
+        (self.store.paths.root / "vault.json").write_text("{broken", encoding="utf-8")
+        self.assertIsNone(self.claude("PostCompact"))
+        self.assertTrue(self.store.vault_compaction_due("s-claude"))
+        output = self.claude("SessionStart", source="compact")
+        self.assertIn(
+            "Vault context is unavailable",
+            output["hookSpecificOutput"]["additionalContext"],
         )
 
     def test_each_compaction_delivers_again(self) -> None:
@@ -708,17 +726,17 @@ class SessionStartDeliveryTests(VaultDeliveryBase):
     def test_racing_compaction_deliveries_emit_once(self) -> None:
         """Two deliveries that both passed the early check still emit once.
 
-        The session start and the PostCompact event of one compaction can run
-        at the same time. Only one of them may record the compact receipt, or
-        the receipt count overtakes the compaction count and the next
-        compaction is treated as already handled.
+        Two hook processes for one compaction can run at the same time. Only
+        one of them may record the compact receipt, or the receipt count
+        overtakes the compaction count and the next compaction is treated as
+        already handled.
         """
 
         self.claude("SessionStart", source="startup")
         self.claude("PreCompact")
         with mock.patch.object(Store, "vault_compaction_due", return_value=True):
             first = self.claude("SessionStart", source="compact")
-            second = self.claude("PostCompact")
+            second = self.claude("SessionStart", source="compact")
         emitted = [
             output
             for output in (first, second)
@@ -732,23 +750,6 @@ class SessionStartDeliveryTests(VaultDeliveryBase):
         self.claude("PreCompact")
         output = self.claude("SessionStart", source="compact")
         self.assertIn(HEAD, output["hookSpecificOutput"]["additionalContext"])
-
-    def test_codex_compaction_delivers_at_post_compact(self) -> None:
-        for session, pre_compact in (("s-codex", False), ("s-codex-pre", True)):
-            with self.subTest(pre_compact=pre_compact):
-                self.claude(
-                    "SessionStart", session=session, env=CODEX_ENV, source="startup"
-                )
-                if pre_compact:
-                    self.claude("PreCompact", session=session, env=CODEX_ENV)
-                output = self.claude("PostCompact", session=session, env=CODEX_ENV)
-                text = output["hookSpecificOutput"]["additionalContext"]
-                self.assertTrue(text.startswith(f"{HEADER}\n{REPLACES}\n\n"))
-                self.assertIn(HEAD, text)
-                self.assertEqual(
-                    self.receipts(session),
-                    [("new", "delivered", None), ("compact", "delivered", None)],
-                )
 
     def test_post_compact_in_off_mode_delivers_nothing(self) -> None:
         self.claude("SessionStart", source="startup")
