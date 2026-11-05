@@ -2,8 +2,28 @@
 
 ## Unreleased
 
+Version 0.2.2 is prepared in the package metadata. Publish and validate the
+matching release before using the tagged install examples.
+
+### Added
+
+- Task guides for installation, verification, vault context, reports, and
+  development.
+- A Claude Code installer that selects the same release for the plugin and
+  terminal command and preserves settings permissions during updates.
+
+### Upgrade
+
+Schema 8 requires a coordinated update of the terminal command and host
+plugins. Follow the [upgrade and rollback steps](docs/schema-8-upgrade.md).
+Keep a complete backup and verify the installed copies before restarting
+sessions. Older runtimes cannot open the upgraded database.
+
 ### Fixed
 
+- Report data entries with shared permissions and Cursor plugins that cannot
+  load from an outside link.
+- Deliver vault context after compaction through an event that accepts it.
 - Count each tool call once when a host reports it more than once. Claude Code
   reports a call before it runs, after it finishes, and again in a batch; the
   repeated-action and failure-loop guidance now fire on real repeats only.
