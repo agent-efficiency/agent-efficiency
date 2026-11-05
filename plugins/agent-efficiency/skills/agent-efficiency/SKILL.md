@@ -11,9 +11,9 @@ defect risk.
 
 ## Session controls
 
-Prefer the natural in-session controls below. The prompt hook handles an exact
-control phrase before a model call, so changing modes does not spend a model
-turn:
+Prefer the in-session controls below. The user types one as an ordinary chat
+message; it is not a slash command. The prompt hook answers an exact control
+phrase before a model call, so changing modes does not spend a model turn:
 
 ```text
 $agent-efficiency on
@@ -21,7 +21,11 @@ $agent-efficiency observe
 $agent-efficiency guard
 $agent-efficiency off
 $agent-efficiency status
+$agent-efficiency vault
+$agent-efficiency help
 ```
+
+`vault` reloads vault context for the current folder.
 
 `on` is an alias for `advise`. Modes are session-scoped:
 
@@ -33,12 +37,25 @@ $agent-efficiency status
   sets `mode = "guard"`.
 
 Use `agent-efficiency default MODE` only when the user asks to change the
-default for future sessions.
+default for future sessions. `agent-efficiency mode MODE` changes the most
+recent session whose working folder is the current folder.
 
-For every CLI example below, use `agent-efficiency` when it is on `PATH`.
-Otherwise run the plugin's own `<plugin-root>/bin/agent-efficiency` wrapper;
-resolve `<plugin-root>` from this skill's installed location. Do not install a
-second copy just to obtain the command.
+## The command
+
+For every CLI example below, use `agent-efficiency` when it is on `PATH`. In a
+Claude Code session the plugin's `bin` folder is usually on `PATH`. Otherwise
+run the plugin's own `<plugin-root>/bin/agent-efficiency` wrapper; resolve
+`<plugin-root>` from this skill's installed location. Every copy of the command
+and every host use the same data folder, so either copy sees the same sessions.
+
+The user's own terminal and the vault git hooks need the command installed
+there. The supported way is `pipx install
+git+https://github.com/agent-efficiency/agent-efficiency@vVERSION`, where
+VERSION is what `agent-efficiency --version` prints. The install guide has the
+details:
+https://github.com/agent-efficiency/agent-efficiency/blob/main/docs/install.md.
+Tell the user about it when a terminal step needs the command. Do not install
+it yourself unless the user asks.
 
 ## Operating contract
 
@@ -55,9 +72,9 @@ When guidance is active:
 5. Verify changed behavior at the relevant boundary before claiming completion.
 6. Never reduce requirements, security, evidence, or validation to save cost.
 
-Runtime policies are advisory except for one bounded Claude Code completion
-checkpoint: after code changes with no observed validation, the Stop hook can
-ask the same agent to validate once. It never loops a second time.
+Runtime policies are advisory except for one bounded completion checkpoint:
+after code changes with no observed validation, the Stop hook can ask the same
+agent to validate once in that turn. It never loops a second time.
 
 ## Inspect and report
 

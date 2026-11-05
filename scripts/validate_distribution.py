@@ -49,7 +49,7 @@ TEXT_SUFFIXES = {
 }
 RUNTIME_LIMIT_BYTES = 700 * 1024
 # Folders a checkout gains from local work, such as the virtual environment
-# the README's Develop section creates. They are skipped when the tree is not
+# that docs/development.md creates. They are skipped when the tree is not
 # a git work tree; inside one, only tracked files are read.
 UNTRACKED_FOLDERS = {
     ".git",
@@ -145,7 +145,8 @@ def validate_distribution(root: Path = ROOT) -> dict[str, Any]:
         for term in FORBIDDEN:
             if term.casefold() in lowered:
                 references.append(f"{path.relative_to(root)}: {term}")
-        if re.search(r"/(?:home|Users)/[^/\s]+/", text):
+        # "you" is the placeholder user the guides use in example output.
+        if re.search(r"/(?:home|Users)/(?!you/)[^/\s]+/", text):
             references.append(f"{path.relative_to(root)}: local home path")
         if re.search(
             r"[A-Za-z0-9._%+-]+@(?:gmail|outlook|yahoo)[.]com",

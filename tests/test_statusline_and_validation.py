@@ -208,6 +208,26 @@ class DistributionValidationTests(unittest.TestCase):
             ],
         )
 
+    def test_validation_allows_only_the_example_home_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = self._source_copy(temp)
+            (root / "docs" / "example.md").write_text(
+                "Created /home/you/code/app/agent-efficiency.toml\n"
+                "Data in /Users/you/.local/share/agent-efficiency\n",
+                encoding="utf-8",
+            )
+            # Built in pieces so this file does not hold a home path itself.
+            leaked = "/".join(("", "home", "alice", "code", "app"))
+            (root / "docs" / "leak.md").write_text(
+                f"Created {leaked}/agent-efficiency.toml\n", encoding="utf-8"
+            )
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+            result = self._validate_copy(root)
+        self.assertEqual(
+            result["forbidden_references"], ["docs/leak.md: local home path"]
+        )
+
     def test_runtime_cli_excludes_maintainer_commands(self) -> None:
         with (
             self.assertRaises(SystemExit),
