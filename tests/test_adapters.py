@@ -124,5 +124,25 @@ class AdapterContractTests(unittest.TestCase):
         self.assertNotIn("command", repr(event).casefold())
 
 
+class CompactionContextTests(unittest.TestCase):
+    def test_no_host_adds_context_after_compaction(self) -> None:
+        """Claude Code and Codex document no context output for PostCompact.
+
+        A context effect there would be dropped, so neither adapter may
+        declare one. The compact session start carries context instead.
+        """
+
+        from agent_efficiency.adapters import ADAPTERS
+
+        for host in ("claude", "codex"):
+            with self.subTest(host=host):
+                self.assertNotIn(
+                    "add_context", ADAPTERS[host].capabilities.get("PostCompact", ())
+                )
+                self.assertIn(
+                    "add_context", ADAPTERS[host].capabilities["SessionStart"]
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

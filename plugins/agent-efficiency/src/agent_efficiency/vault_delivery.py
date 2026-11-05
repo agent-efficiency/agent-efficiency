@@ -11,8 +11,9 @@ Lifecycle causes:
 * ``resume``: deliver only if the rendered text changed since the last delivery
   in this session.
 * ``compact``: deliver once per compaction, because the earlier context is
-  gone. A host can send more than one event after a compaction, and the first
-  one delivers.
+  gone. Claude Code and Codex deliver at the session start whose source is
+  compact; they take no context from ``PostCompact``. Cursor delivers at the
+  next successful tool result.
 * ``request``: an explicit prompt; always reselect and deliver.
 * ``deferred``: a host with no session start delivers at the first event that
   can carry context.
@@ -265,9 +266,9 @@ def _finish(
             return Delivery(None, "skipped", "unchanged")
         return Delivery(output, disposition, code)
     if cause == "compact" and disposition in VAULT_COMPACTION_HANDLED:
-        # A session start after a compaction and a PostCompact event can race to
-        # handle one compaction. Only the one that records the receipt sends its
-        # output, so the receipt count never overtakes the compaction count.
+        # Two hook processes can race to handle one compaction. Only the one
+        # that records the receipt sends its output, so the receipt count
+        # never overtakes the compaction count.
         # A claim that cannot be recorded still sends, because a second copy
         # is better than no context after a compaction.
         try:
