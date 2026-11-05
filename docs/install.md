@@ -4,6 +4,9 @@ This guide helps you install Agent Efficiency in Claude Code, Codex, or
 Cursor, install the terminal command, keep both up to date, add the Claude Code
 status line, and remove everything again.
 
+The tagged examples require version 0.2.2 to be published. For an unreleased
+checkout, use the [local development steps](development.md#try-your-checkout-in-a-host).
+
 ## Before you start
 
 - **Python 3.11 or newer as `python3` on your PATH.** The hooks run
@@ -74,7 +77,7 @@ set up Codex or Cursor; follow the steps below for those.
 ## Claude Code by hand
 
 ```bash
-claude plugin marketplace add agent-efficiency/agent-efficiency
+claude plugin marketplace add "agent-efficiency/agent-efficiency#v0.2.2"
 claude plugin install agent-efficiency@agent-efficiency
 ```
 
@@ -96,8 +99,8 @@ Installed plugins:
     Status: ✔ enabled
 ```
 
-To install a fixed release instead of the latest one, add the marketplace
-pinned to a tag:
+To select another release, use its tag for both the marketplace and the
+terminal command. The examples pin version 0.2.2:
 
 ```bash
 claude plugin marketplace add "agent-efficiency/agent-efficiency#v0.2.2"
