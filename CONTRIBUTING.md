@@ -19,6 +19,9 @@ Small fixes can go directly to a pull request.
 
 ## Development setup
 
+[docs/development.md](docs/development.md) covers setup, checks, trying a
+checkout in a host, and the project's limits. In short:
+
 ```bash
 git clone https://github.com/agent-efficiency/agent-efficiency.git
 cd agent-efficiency

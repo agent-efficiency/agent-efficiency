@@ -1,25 +1,49 @@
 # Architecture
 
-Agent Efficiency is one local runtime with thin adapters for Claude Code,
-Cursor, and Codex.
+This page helps you see how the parts of Agent Efficiency fit together before
+you change or extend them. It is one local runtime with thin adapters for
+Claude Code, Cursor, and Codex.
 
 ```mermaid
 flowchart LR
-    C[Claude Code hooks] --> A[host adapter]
-    U[Cursor hooks] --> A
-    X[Codex hooks] --> A
-    A --> E[canonical lifecycle event]
-    E --> P[deterministic policies]
-    E --> G[bundled guidance selector]
-    E --> V[verification state]
-    E --> K[vault context]
-    K --> R
-    P --> I[host-neutral intervention]
-    G --> I
-    V --> I
-    I --> R[host renderer]
-    E --> S[(local SQLite)]
+    subgraph hosts["Agent hosts"]
+        CC["Claude Code"]
+        CX["Codex"]
+        CU["Cursor"]
+    end
+    CC -->|hook event| AD["Host adapter"]
+    CX -->|hook event| AD
+    CU -->|hook event| AD
+    AD --> EV["Canonical event"]
+    subgraph runtime["Shared runtime"]
+        PO["Policies"]
+        GC["Guidance cards"]
+        VE["Verification"]
+        VA["Vault context"]
+    end
+    EV --> PO
+    EV --> GC
+    EV --> VE
+    EV --> VA
+    PO --> RE["Renderer"]
+    GC --> RE
+    VE --> RE
+    VA --> RE
+    RE -->|host-native response| hosts
+    EV --> DB[("SQLite store")]
+    RE --> DB
+    CLI["Terminal command"] --> DB
+    CLI -->|check| VE
+    SL["Claude Code status line"] -->|cost and tokens| DB
 ```
+
+Each host runs the plugin's hook command on its lifecycle events. The adapter
+for that host turns the native event into one canonical event. Four parts of
+the shared runtime read it: the policies (fixed rules for repeated work and
+unverified changes), the guidance cards, the verification state, and the vault
+context. The renderer turns what they return into the response format of that
+host. The store keeps counts and states. The terminal command and the Claude
+Code status line use the same store.
 
 The lifecycle path makes no model calls and no network requests. It uses the
 Python standard library and local SQLite.
@@ -70,6 +94,31 @@ are:
 
 The renderer never assumes that every host supports every effect. A missing
 effect becomes a notification or no action, based on the policy contract.
+
+## Session lifecycle
+
+```mermaid
+flowchart TD
+    SS["SessionStart: pin the guidance pack, send vault context"] --> UP
+    UP["UserPromptSubmit: answer a control message, or classify the task and add a guidance card"] --> PT
+    PT["PreToolUse: classify the action, count repeats and broad scans"] --> TOOL["The tool runs"]
+    TOOL --> PO["PostToolUse or PostToolUseFailure: count failures, note an unverified edit"]
+    PO -->|next tool call| PT
+    PO --> ST["Stop: ask once for a check after an unverified code change"]
+    ST -->|next prompt| UP
+    ST --> SE["SessionEnd: close the session record"]
+    PO -.-> PC["PreCompact: count the compaction, warn during a failure loop"]
+    PC -.-> AC["Compact SessionStart: send vault context again"]
+    AC -.-> PT
+```
+
+A session starts once, then runs a loop of prompts. Each prompt can run a loop
+of tool calls. After each tool call the agent either calls another tool or
+stops. After a stop, the next prompt starts the loop again, or the session
+ends. A compaction can happen at any point in a long turn; the dotted path
+shows it. Cursor sends no event after a compaction that can carry context, so
+on Cursor the next successful tool result carries the vault context instead.
+Codex also sends `PermissionRequest`; Agent Efficiency does not answer it.
 
 ## Canonical facts
 
@@ -131,27 +180,40 @@ session pin. A running session does not change packs.
 Vault context is a separate channel from guidance. It never counts against
 the advice budget and never appears in intervention measurement.
 
-```text
-registered trees (vault.json in the data directory)
-  -> each tree's index.json
-  -> selection by paths, repos, and branches for the working directory
-  -> rendering inside a 9,000 character allowance
-  -> host adapter output
-  -> closed vault receipt
+```mermaid
+flowchart TD
+    REG["vault register: tree paths in vault.json in the data folder"] --> IDX
+    IDX["Each tree's index.json, built by vault index"] --> SEL
+    CWD["Working folder and its git metadata"] --> SEL
+    SEL["Selection by paths, repos, and branches"] --> REN
+    REN["Rendering inside the 9,000 character allowance"] --> DEL
+    DEL["Delivery by the host adapter"] --> REC["Vault receipt: counts, two digests, fixed codes"]
+    subgraph guards["Vault git hooks"]
+        PCM["pre-commit: vault check --staged"]
+        PPS["pre-push: vault check --push"]
+    end
+    NOTES["Notes you write and commit"] --> PCM
+    PCM --> IDX
+    PPS --> REMOTE["The one remote in .vault.json"]
 ```
 
+The top path runs on every delivery and only reads files. The git hooks run
+when you commit to or push a vault tree. They check note format, size caps,
+classification, duplicate ids, that `index.json` matches the notes, known
+credential shapes, and the push remote.
+
 Selection reads git metadata files directly and never starts a git process.
-It never opens a note body. Rendering places the matched project note in full
-and one line for each other note in scope, core first, and counts what did
-not fit.
+It never opens a note body. Rendering puts the matched project note first, in
+full. Then it adds one line for each other active note in scope, core tree
+first, and counts what did not fit.
 
 Delivery causes are `new`, `resume`, `compact`, `request`, and `deferred`.
 Resume delivers only when the rendered text changed.
 
 Each compaction is counted by its `PreCompact` event and delivers once. On
-Claude Code and Codex, the compact session start or `PostCompact` delivers,
-whichever arrives first. Cursor sends neither, so its next successful tool
-result delivers. The check that a compaction is still due and the insert of
+Claude Code and Codex, the compact session start delivers. `PostCompact`
+accepts no context and leaves that delivery pending. On Cursor, the next
+successful tool result delivers. The check that a compaction is still due and the insert of
 its receipt share one immediate SQLite transaction, so two racing events
 cannot both deliver.
 
@@ -245,8 +307,8 @@ Experiments compare exact matched strata:
 - agent profile.
 
 Accepted outcomes require an explicit evidence kind and digest. Evidence
-content and location are not stored. Evaluation reports observed differences,
-not causality.
+content and location are not stored. Evaluation reports observed differences
+and does not claim causes. The method is in [Measurement](measurement.md).
 
 ## Failure behavior
 
@@ -259,8 +321,9 @@ Guard mode is the exception only after all of these conditions hold:
 2. A check is marked as required.
 3. The check applies to the changed file classes.
 4. No current passing receipt exists.
-5. The host supports a bounded continuation.
-6. The session has not already used its one continuation.
+5. The turn changed code.
+6. The host supports a bounded continuation.
+7. The turn has not already used its continuation.
 
 ## Package layout
 
@@ -269,7 +332,9 @@ plugins/agent-efficiency/
   .claude-plugin/
   .cursor-plugin/
   .codex-plugin/
+  bin/
   hooks/
+  schemas/
   skills/
   scripts/
   src/agent_efficiency/
@@ -279,6 +344,8 @@ plugins/agent-efficiency/
 
 scripts/
   build_guidance_pack.py
+  build_policy_pack.py
+  check_wheel_install.py
   validate_distribution.py
 
 tests/
