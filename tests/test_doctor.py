@@ -440,6 +440,34 @@ class InstalledHostTests(unittest.TestCase):
         self.assertTrue(cursor["installed"])
         self.assertFalse(cursor["ready"])
 
+    def test_cursor_link_to_a_folder_outside_is_not_loadable(self) -> None:
+        """Cursor skips a local plugin link whose target is outside its folder."""
+
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp)
+            local = home / ".cursor" / "plugins" / "local"
+            local.mkdir(parents=True)
+            clone = plugin_copy(home / "src" / "agent-efficiency")
+            (local / "agent-efficiency").symlink_to(clone)
+            code, doctor = self.doctor(home)
+        self.assertEqual(code, 1)
+        cursor = doctor["installed_hosts"]["cursor"]
+        self.assertFalse(cursor["ready"])
+        (reason,) = cursor["installs"][0]["not_ready_reasons"]
+        self.assertIn("Cursor skips a link to a folder outside", reason)
+        self.assertIn(str(local), reason)
+
+    def test_cursor_link_inside_its_folder_is_loadable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp)
+            local = home / ".cursor" / "plugins" / "local"
+            local.mkdir(parents=True)
+            copy = plugin_copy(local / "agent-efficiency-0.2.2")
+            (local / "agent-efficiency").symlink_to(copy)
+            code, doctor = self.doctor(home)
+        self.assertEqual(code, 0, doctor["installed_hosts"]["cursor"])
+        self.assertTrue(doctor["installed_hosts"]["cursor"]["ready"])
+
     def test_text_output_names_each_host(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             home = Path(temp)
