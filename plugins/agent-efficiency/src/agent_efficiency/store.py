@@ -1329,19 +1329,44 @@ class Store:
                     SUM(CASE WHEN event_name = 'PreToolUse'
                              THEN 1 ELSE 0 END) AS starts,
                     SUM(CASE WHEN resolves = 1 THEN 1 ELSE 0 END) AS resolved,
-                    SUM(CASE WHEN event_name IN ({placeholders})
+                    SUM(CASE WHEN resolves = 1 AND outcome = ?
+                             THEN 1 ELSE 0 END) AS same_outcome,
+                    SUM(CASE WHEN event_name IN ({placeholders}) AND outcome = ?
                              THEN 1 ELSE 0 END) AS same_family
                   FROM events
                  WHERE session_id = ? AND turn_key = ? AND signature = ?
                 """,
-                (*family, session_id, turn_key, signature),
+                (outcome, *family, outcome, session_id, turn_key, signature),
             ).fetchone()
             starts = int(prior["starts"] or 0)
             resolved = int(prior["resolved"] or 0)
             same_family = int(prior["same_family"] or 0)
-            # A family reports each call at most once, so its next report is a
-            # new call only while it has reported no more calls than are resolved.
-            resolves = same_family + 1 > resolved
+            # Without an identifier, match reports of the same outcome. A
+            # successful report must never consume a failure, or the reverse.
+            resolves = same_family + 1 > int(prior["same_outcome"] or 0)
+            call_digest = safe_details.get("call_digest")
+            if call_digest:
+                reports = conn.execute(
+                    "SELECT event_name, outcome, safe_details FROM events "
+                    "WHERE session_id = ? AND turn_key = ? AND signature = ?",
+                    (session_id, turn_key, signature),
+                )
+                identities = [
+                    (row, json.loads(row["safe_details"]).get("call_digest"))
+                    for row in reports
+                    if row["event_name"] in (*SINGLE_RESULT_EVENTS, "PostToolBatch")
+                ]
+                if any(digest == call_digest for _row, digest in identities):
+                    resolves = False
+                elif not any(
+                    digest is None
+                    and row["outcome"] == outcome
+                    and row["event_name"] not in family
+                    for row, digest in identities
+                ):
+                    # Distinct named calls do not need matching report counts.
+                    # If the other family omitted ids, use the outcome match.
+                    resolves = True
             # A resolved call with no start of its own was never counted at start.
             new_call = resolves and starts <= resolved
             conn.execute(

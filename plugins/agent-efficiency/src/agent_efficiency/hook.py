@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import os
 import re
 import sqlite3
@@ -556,6 +557,18 @@ def _on_prompt(
     )
 
 
+def _call_details(payload: dict[str, Any], details: dict[str, Any]) -> dict[str, Any]:
+    """Keep a call identifier as a digest, separate from the command signature."""
+
+    call_id = payload.get("tool_use_id")
+    if not isinstance(call_id, str) or not call_id.strip():
+        return details
+    digest = hashlib.sha256(
+        ("agent-efficiency-call-v1:" + call_id).encode("utf-8")
+    ).hexdigest()
+    return {**details, "call_digest": digest}
+
+
 def _on_pre_tool(
     payload: dict[str, Any],
     store: Store,
@@ -581,7 +594,7 @@ def _on_pre_tool(
         command_class=facts.command_class,
         signature=facts.signature,
         outcome="pending",
-        safe_details=facts.safe_details,
+        safe_details=_call_details(payload, facts.safe_details),
         count_tool=True,
         count_subagent=facts.is_subagent,
         count_broad_scan=facts.is_broad_scan,
@@ -673,7 +686,7 @@ def _on_post_tool(
         signature=facts.signature,
         outcome="failure" if failed else "success",
         duration_ms=duration_ms,
-        safe_details=facts.safe_details,
+        safe_details=_call_details(payload, facts.safe_details),
         count_failure=failed,
         count_edit=facts.is_edit and not failed,
         count_code_edit=facts.is_code_edit and not failed,
@@ -751,7 +764,7 @@ def _on_post_batch(
             signature=facts.signature,
             outcome="failure" if failed else "success",
             duration_ms=None,
-            safe_details=facts.safe_details,
+            safe_details=_call_details(call, facts.safe_details),
             count_failure=failed,
             count_edit=facts.is_edit and not failed,
             count_code_edit=facts.is_code_edit and not failed,
