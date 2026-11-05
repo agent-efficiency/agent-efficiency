@@ -213,6 +213,9 @@ starts a local session record.
 Read the [changelog](../CHANGELOG.md) first. Some releases ask you to do
 something after the upgrade.
 
+For a release that introduces schema 8, follow the
+[coordinated database upgrade](schema-8-upgrade.md) before resuming sessions.
+
 ### Claude Code
 
 If you used the installer, check out the new release tag in your clone (here

@@ -1,6 +1,6 @@
 {
   "name": "agent-efficiency",
-  "version": "0.2.1+codex.20260930150501",
+  "version": "0.2.2+codex.20261105232058",
   "description": "Local verification and efficiency governance for coding agents.",
   "author": {
     "name": "Agent Efficiency maintainers",
