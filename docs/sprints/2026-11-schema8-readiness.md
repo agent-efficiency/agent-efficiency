@@ -14,18 +14,24 @@ remains on its separate review branch.
 
 | Item | Deliverable | Acceptance | Status |
 | --- | --- | --- | --- |
-| S8-1 | Report installed runtime schemas in `doctor`. | All three hosts fail readiness when an installed schema differs from the command or cannot be read. A matching version label does not hide a mismatch. Text and JSON identify the affected copy. | In progress |
+| S8-1 | Report installed runtime schemas in `doctor`. | All three hosts fail readiness when an installed schema differs from the command or cannot be read. A matching version label does not hide a mismatch. Text and JSON identify the affected copy. | Complete |
 | S8-2 | Keep a repeatable migration and rollback rehearsal in the repository. | Run with synthetic data in a new folder. Bind the result to the old and new source commits. Check retained records, backup integrity, old-runtime rejection, and rollback. Keep failed attempts. | Queued |
 | S8-3 | Prepare the release evidence record and live-host procedure. | Record the tested commits, installed paths, schema versions, migration result, and one new session per active host. Mark unrun host checks as pending. | Queued |
 
 S8-1 reads the installed schema declaration without importing that runtime.
 It preserves the existing rules for disabled plugins and project installs
 that do not apply in the checked folder. Its checks must not migrate the data
-folder. Matching schemas establish compatibility for this upgrade check;
-they do not prove that the host loaded the plugin or that the builds match.
+folder. Matching schema declarations pass this check. They do not prove that
+the host loaded the plugin or that the builds match.
 
 S8-2 replaces the temporary rehearsal used during branch preparation with a
 maintained command. It must not accept or mutate a live data folder.
+Use `scripts/check_schema_upgrade.py` for the command. Resolve an explicit
+baseline ref to a commit before exporting its plugin source. Record both
+source commits and reject uncommitted candidate code. Use synthetic sessions,
+events, and receipts. Each run gets a new output folder; an existing folder
+must cause a refusal. The result must retain a failed step and its error,
+not replace that attempt with a later pass.
 
 S8-3 prepares a concrete release review. Publication and a live data migration
 are separate actions. Their evidence remains pending until those actions run.
@@ -55,4 +61,13 @@ cost per turn.
   `e954a22`.
 - Created the sprint branch from the release fixes. Existing worktrees and
   the combined experiment branch remain available for review.
-- Started S8-1 with regression tests for installed schema mismatches.
+- Completed S8-1. Doctor reports the command's schema and the schema declared
+  by each installed copy. Unknown or different schemas prevent the affected
+  host from being ready and skip its hook probe.
+- The 764-test release-branch suite passed. All 9 new tests passed on Python
+  3.11. The focused doctor run passed 15 tests. Pre-commit, pack builders,
+  distribution checks, wheel installation, isolated doctor, and Claude plugin
+  validation passed. Claude reported an optional listing-icon warning.
+- The regression tests confirmed that schema inspection leaves an existing
+  schema 7 database unchanged. No live installation or migration was run.
+- S8-2 is next. S8-3 remains queued until the repeatable rehearsal is ready.

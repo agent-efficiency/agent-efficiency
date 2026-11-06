@@ -59,10 +59,18 @@ For local development, `bash install.sh --source "$PWD"` uses one checkout
 for both. An existing command used with `--no-command` must already match.
 
 Verify each installed copy before allowing it to open the real data folder.
-Use the paths reported by doctor. Its `agent_efficiency/store.py` must declare
-`SCHEMA_VERSION = "8"`. Compare the installed code with the tested release
-artifact or source commit. A version label alone is insufficient if an earlier
-local build reused that label.
+Run `agent-efficiency doctor --json` with the new command. It reports the
+command's `runtime_schema_version` and each installed copy's `schema_version`
+and `schema_matches_runtime`. An affected host is not ready when its schema
+differs or cannot be read. The text output names the copy and the mismatch.
+Doctor reads the schema declaration without importing that installed runtime,
+and skips its hook probe when the schema is unknown or different.
+
+For this upgrade, the command and every active installed copy must report
+schema 8. Compare the installed code with the tested release artifact or
+source commit too. Matching schemas do not prove matching builds or that a
+live host loaded the plugin. A version label alone is insufficient if an
+earlier local build reused that label.
 
 For Cursor, replace the plugin with a copy inside its local plugin folder.
 An outside symlink is not loadable. For every host, reload the plugin or restart
