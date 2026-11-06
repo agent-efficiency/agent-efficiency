@@ -32,8 +32,8 @@ model calls and no network requests.
 
 ## Quick start for Claude Code
 
-The tagged install examples target version 0.2.2 and require that release to
-be published. To review an unreleased checkout, use the
+The tagged install examples target version 0.2.2. To review an unreleased
+checkout, use the
 [local development steps](docs/development.md#try-your-checkout-in-a-host).
 
 You need Claude Code, Python 3.11 or newer as `python3` on your PATH, and

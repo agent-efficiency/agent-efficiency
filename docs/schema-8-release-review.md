@@ -4,9 +4,9 @@ Review the release fixes separately from the vault experiment. A passing
 synthetic rehearsal supports migration review. Live installation and session
 evidence are separate requirements.
 
-Version 0.2.2 is held for owner approval. Read its
-[release notes](releases/0.2.2.md) with the evidence record. A local version
-tag and built artifacts do not authorize publication or a live upgrade.
+The owner approved publication of version 0.2.2 on 2026-11-06. Read its
+[release notes](releases/0.2.2.md) with the evidence record. Publication does
+not establish live host activation or complete a live upgrade.
 
 ## Run the maintained rehearsal
 
@@ -109,6 +109,6 @@ host loaded its installed hooks.
 5. Confirm that earlier sessions and receipts remain reportable. Keep the
    pre-upgrade backup and old installers until the review is accepted.
 
-Publication, real installation, and live data migration remain pending until
-performed. This record does not establish cost savings or task acceptance
-improvements.
+Record publication separately from real installation and live data migration.
+Live checks remain pending until performed. This record does not establish
+cost savings or task acceptance improvements.

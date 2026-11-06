@@ -1,10 +1,9 @@
 # Changelog
 
-## 0.2.2 (unreleased)
+## 0.2.2 - 2026-11-06
 
-Version 0.2.2 is reserved for this release candidate. Publication is on hold
-for owner approval. See the [release notes](docs/releases/0.2.2.md). Publish
-and validate the matching release before using the tagged install examples.
+See the [release notes](docs/releases/0.2.2.md) and the schema 8 upgrade
+requirements below.
 
 ### Added
 
