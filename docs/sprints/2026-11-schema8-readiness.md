@@ -37,9 +37,10 @@ S8-3 prepares a concrete release review. Publication and a live data migration
 are separate actions. Their evidence remains pending until those actions run.
 
 The owner requested a completed local build and a versioned candidate, with
-publication held for approval. Version 0.2.2 is reserved for that candidate.
-The [release notes](../releases/0.2.2.md) define its scope and pending checks.
-Local build completion does not complete the live checks in S8-3.
+publication held for approval. The local build passed, and the owner approved
+publication of version 0.2.2 on 2026-11-06. The
+[release notes](../releases/0.2.2.md) define its scope and pending checks.
+Publication does not complete the live checks in S8-3.
 
 ## Completion evidence
 

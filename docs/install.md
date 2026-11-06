@@ -4,7 +4,7 @@ This guide helps you install Agent Efficiency in Claude Code, Codex, or
 Cursor, install the terminal command, keep both up to date, add the Claude Code
 status line, and remove everything again.
 
-The tagged examples require version 0.2.2 to be published. For an unreleased
+The tagged examples install version 0.2.2. For an unreleased
 checkout, use the [local development steps](development.md#try-your-checkout-in-a-host).
 
 ## Before you start
