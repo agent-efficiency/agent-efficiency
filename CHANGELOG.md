@@ -1,9 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.2.2 (unreleased)
 
-Version 0.2.2 is prepared in the package metadata. Publish and validate the
-matching release before using the tagged install examples.
+Version 0.2.2 is reserved for this release candidate. Publication is on hold
+for owner approval. See the [release notes](docs/releases/0.2.2.md). Publish
+and validate the matching release before using the tagged install examples.
 
 ### Added
 

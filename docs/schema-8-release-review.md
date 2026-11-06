@@ -4,6 +4,10 @@ Review the release fixes separately from the vault experiment. A passing
 synthetic rehearsal supports migration review. Live installation and session
 evidence are separate requirements.
 
+Version 0.2.2 is held for owner approval. Read its
+[release notes](releases/0.2.2.md) with the evidence record. A local version
+tag and built artifacts do not authorize publication or a live upgrade.
+
 ## Run the maintained rehearsal
 
 From the checkout being reviewed:
