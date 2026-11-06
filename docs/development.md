@@ -71,6 +71,10 @@ A smoke test does not replace a live session. The tests also include
 fixtures for every declared Claude Code, Cursor, and Codex event under
 `tests/fixtures/hosts/`.
 
+For schema 8 release work, run the maintained migration and rollback rehearsal
+in [Release review](schema-8-release-review.md). It exports committed source
+and retains synthetic data and results in a new folder for each attempt.
+
 ## Layout
 
 - `plugins/agent-efficiency/` is the installed plugin: one manifest and one
