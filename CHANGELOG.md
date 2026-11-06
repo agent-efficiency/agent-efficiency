@@ -21,6 +21,9 @@ sessions. Older runtimes cannot open the upgraded database.
 
 ### Fixed
 
+- Report installed plugin schemas in doctor. An affected host is not ready
+  when its schema differs from the terminal command or cannot be read, even
+  when the package version labels match.
 - Report data entries with shared permissions and Cursor plugins that cannot
   load from an outside link.
 - Deliver vault context after compaction through an event that accepts it.

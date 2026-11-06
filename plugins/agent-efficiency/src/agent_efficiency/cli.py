@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import fnmatch
 import json
 import os
@@ -68,7 +69,7 @@ from agent_efficiency.experiments import (
     record_outcome,
 )
 from agent_efficiency.statusline import process_statusline
-from agent_efficiency.store import Store, project_identity
+from agent_efficiency.store import SCHEMA_VERSION, Store, project_identity
 from agent_efficiency.vault import cli_commands as vault_commands
 from agent_efficiency.verification.config import load_project_config
 from agent_efficiency.verification.receipts import reason_text, receipt_state
@@ -940,6 +941,8 @@ def _plugin_folder_status(
         hooks_ready = False
         referenced = set()
         first_command = None
+    schema_version = _plugin_schema_version(root)
+    schema_matches_runtime = schema_version == SCHEMA_VERSION
     not_ready_reasons: list[str] = []
     if not root.is_dir():
         not_ready_reasons.append(f"the plugin folder {root} does not exist")
@@ -954,6 +957,19 @@ def _plugin_folder_status(
                 f"{hooks_path} must list the {host} events and use {root_variable}"
             )
         not_ready_reasons.extend(_missing_runtime_files(root, referenced))
+        if schema_version is None:
+            not_ready_reasons.append(
+                f"cannot read the database schema version from "
+                f"{root / 'src/agent_efficiency/store.py'}; reinstall the plugin "
+                "and terminal command from the same release"
+            )
+        elif not schema_matches_runtime:
+            not_ready_reasons.append(
+                f"the plugin at {root} declares schema {schema_version}, but "
+                f"this command uses schema {SCHEMA_VERSION}; install the same "
+                "release for the plugin and terminal command before migrating "
+                "data or restarting sessions"
+            )
         if probe and not not_ready_reasons and first_command is not None:
             failure = _probe_hook_command(root, first_command, root_variable)
             if failure:
@@ -970,12 +986,51 @@ def _plugin_folder_status(
             )
     return {
         "version": version,
+        "schema_version": schema_version,
+        "schema_matches_runtime": schema_matches_runtime,
         "manifest_ready": manifest_ready,
         "hooks_ready": hooks_ready,
         "event_count": len(event_names),
         "ready": not not_ready_reasons,
         "not_ready_reasons": not_ready_reasons,
     }
+
+
+def _plugin_schema_version(root: Path) -> str | None:
+    """Read the installed schema declaration without importing its code."""
+
+    try:
+        source = (root / "src/agent_efficiency/store.py").resolve()
+        if not source.is_relative_to(root.resolve()):
+            return None
+        module = ast.parse(source.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, SyntaxError, ValueError, RuntimeError):
+        return None
+    declarations = [
+        node.value
+        for node in module.body
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "SCHEMA_VERSION"
+    ]
+    assignments = sum(
+        isinstance(node, ast.Name)
+        and node.id == "SCHEMA_VERSION"
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+        for node in ast.walk(module)
+    )
+    if len(declarations) != 1 or assignments != 1:
+        return None
+    value = declarations[0]
+    if (
+        isinstance(value, ast.Constant)
+        and isinstance(value.value, str)
+        and value.value.isascii()
+        and value.value.isdecimal()
+    ):
+        return value.value
+    return None
 
 
 # Files every hook command needs besides the script it names: the package the
@@ -1200,6 +1255,8 @@ def _claude_installs(config: Path) -> dict[str, Any]:
                 "scope": record.get("scope") or "user",
                 "path": str(path),
                 "version": record.get("version") or status["version"],
+                "schema_version": status["schema_version"],
+                "schema_matches_runtime": status["schema_matches_runtime"],
                 "ready": status["ready"],
                 "not_ready_reasons": status["not_ready_reasons"],
             }
@@ -1245,6 +1302,8 @@ def _codex_installs(codex_home: Path) -> dict[str, Any]:
                     "scope": "user",
                     "path": str(cache),
                     "version": None,
+                    "schema_version": None,
+                    "schema_matches_runtime": False,
                     "ready": False,
                     "not_ready_reasons": [
                         f"Codex lists {plugin_id} as enabled, but {cache} holds "
@@ -1261,6 +1320,8 @@ def _codex_installs(codex_home: Path) -> dict[str, Any]:
                 "scope": "user",
                 "path": str(active),
                 "version": status["version"] or active.name,
+                "schema_version": status["schema_version"],
+                "schema_matches_runtime": status["schema_matches_runtime"],
                 "ready": status["ready"],
                 "not_ready_reasons": status["not_ready_reasons"],
             }
@@ -1304,6 +1365,8 @@ def _cursor_installs(cursor_home: Path) -> dict[str, Any]:
                 "scope": "user",
                 "path": str(local),
                 "version": status["version"],
+                "schema_version": status["schema_version"],
+                "schema_matches_runtime": status["schema_matches_runtime"],
                 "ready": status["ready"],
                 "not_ready_reasons": status["not_ready_reasons"],
             }
@@ -1401,6 +1464,7 @@ def _doctor(
     data_dir_private = not readable
     checks: dict[str, Any] = {
         "runtime_version": __version__,
+        "runtime_schema_version": SCHEMA_VERSION,
         "python": platform.python_version(),
         "python_minimum": minimum_python,
         "python_supported": unsupported_python_message(sys.version_info) is None,
@@ -1589,6 +1653,7 @@ def _tool_version(command: str) -> str | None:
 # that _doctor returns; a test holds that true.
 DOCTOR_TEXT_KEYS = (
     "runtime_version",
+    "runtime_schema_version",
     "python",
     "python_minimum",
     "hook_python",
@@ -1670,6 +1735,7 @@ def _format_installed(installed: dict[str, Any]) -> list[str]:
                 f"{name}: {state}, {install['version']} "
                 f"({install['scope']} scope) at {install['path']}"
             )
+            lines.append(f"  schema: {install.get('schema_version') or 'unknown'}")
             label = (
                 "warning"
                 if install.get("applies_here") is False and install["scope"] != "user"
