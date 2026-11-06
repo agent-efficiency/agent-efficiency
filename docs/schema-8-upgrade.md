@@ -8,6 +8,10 @@ Use one tested release for the whole upgrade. Tagged install commands require
 that release to be published. For a local rehearsal, use a copied data folder
 and install both the plugin and command from the same checkout.
 
+Maintainers can first run the [synthetic release rehearsal](schema-8-release-review.md).
+It checks the committed runtimes without opening a live data folder. It does
+not replace the copy-based rehearsal and installed-host checks below.
+
 ## Prepare and rehearse
 
 1. Record the current terminal and plugin versions and installed paths with

@@ -15,8 +15,8 @@ remains on its separate review branch.
 | Item | Deliverable | Acceptance | Status |
 | --- | --- | --- | --- |
 | S8-1 | Report installed runtime schemas in `doctor`. | All three hosts fail readiness when an installed schema differs from the command or cannot be read. A matching version label does not hide a mismatch. Text and JSON identify the affected copy. | Complete |
-| S8-2 | Keep a repeatable migration and rollback rehearsal in the repository. | Run with synthetic data in a new folder. Bind the result to the old and new source commits. Check retained records, backup integrity, old-runtime rejection, and rollback. Keep failed attempts. | Queued |
-| S8-3 | Prepare the release evidence record and live-host procedure. | Record the tested commits, installed paths, schema versions, migration result, and one new session per active host. Mark unrun host checks as pending. | Queued |
+| S8-2 | Keep a repeatable migration and rollback rehearsal in the repository. | Run with synthetic data in a new folder. Bind the result to the old and new source commits. Check retained records, backup integrity, old-runtime rejection, and rollback. Keep failed attempts. | Complete |
+| S8-3 | Prepare the release evidence record and live-host procedure. | Record the tested commits, installed paths, schema versions, migration result, and one new session per active host. Mark unrun host checks as pending. | Prepared; live checks pending |
 
 S8-1 reads the installed schema declaration without importing that runtime.
 It preserves the existing rules for disabled plugins and project installs
@@ -70,4 +70,16 @@ cost per turn.
   validation passed. Claude reported an optional listing-icon warning.
 - The regression tests confirmed that schema inspection leaves an existing
   schema 7 database unchanged. No live installation or migration was run.
-- S8-2 is next. S8-3 remains queued until the repeatable rehearsal is ready.
+- Implemented S8-2 as `scripts/check_schema_upgrade.py`. It retains source
+  archives, step logs, synthetic data, and a result for each attempt. All 13
+  focused tests passed on the default Python and Python 3.11.
+- The rehearsal passed against the retained schema 7 source. The first
+  attempt failed on temporary SQLite coordination files and remains retained.
+  The corrected comparison includes logical database records and persistent
+  files. Backup comparison still includes every copied file.
+- Prepared [Release review](../schema-8-release-review.md) for S8-3. It names
+  the required evidence and the live-host procedure. Publication, installed
+  host checks, and live migration remain pending.
+- The 777-test suite passed after S8-2. Pack builders, distribution checks,
+  wheel installation, isolated doctor, pre-commit, and Claude plugin
+  validation also passed. The release review still requires live evidence.

@@ -7,6 +7,9 @@ matching release before using the tagged install examples.
 
 ### Added
 
+- A repeatable schema 8 migration and rollback rehearsal using committed
+  sources and synthetic data. Each attempt retains its own artifacts and
+  result, including failures and incomplete runs.
 - Task guides for installation, verification, vault context, reports, and
   development.
 - A Claude Code installer that selects the same release for the plugin and
