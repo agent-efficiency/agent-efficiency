@@ -104,7 +104,22 @@ def deliver_vault_context(
     claim_request = cause == "request" and event == "PostToolUse"
 
     try:
-        prepared = prepare(cwd, store.paths.root)
+        from agent_efficiency.guidance import load_candidates
+        from agent_efficiency.guidance_state import context_reserve, in_experiment
+
+        try:
+            reserve = context_reserve(store, session_id)
+        except (OSError, ValueError, sqlite3.Error):
+            # An optional receipt failure must not disable the vault.
+            reserve = 500
+        if host in {"claude", "codex"} and mode in {"advise", "guard"}:
+            try:
+                if load_candidates(cwd) and not in_experiment(store, session_id):
+                    reserve = 500
+            except (OSError, ValueError, RuntimeError, sqlite3.Error):
+                # Invalid or expired proposals must not reduce vault context.
+                pass
+        prepared = prepare(cwd, store.paths.root, reserve=reserve)
     except Exception:  # noqa: BLE001
         # Vault context is optional and must never stop a session. The
         # specific error types are already classified inside prepare.

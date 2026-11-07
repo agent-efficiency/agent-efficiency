@@ -9,6 +9,7 @@ EFFECT_NAMES = (
     "none",
     "add_context",
     "notify",
+    "notice",
     "deny_action",
     "continue_turn",
     "replace_action",

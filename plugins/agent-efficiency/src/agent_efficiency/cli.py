@@ -96,6 +96,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     vault_commands.register(subparsers)
 
+    guidance_parser = subparsers.add_parser(
+        "guidance", help="Validate optional local suggestions."
+    )
+    guidance_commands = guidance_parser.add_subparsers(
+        dest="guidance_command", required=True
+    )
+    guidance_validate = guidance_commands.add_parser(
+        "validate", help="Check the local proposal file without changing choices."
+    )
+    guidance_validate.add_argument(
+        "--cwd", default=".", help="Working directory containing the proposal file."
+    )
+
     for mode_command in ("on", "off", "observe", "advise", "guard"):
         mode_parser = subparsers.add_parser(
             mode_command, help=f"Set the latest local session to {mode_command}."
@@ -313,6 +326,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         # No vault command reads the database, so dispatch before the store is
         # built. A git hook must still work when the data directory does not.
         return vault_commands.dispatch(args)
+    if args.command == "guidance":
+        from agent_efficiency.guidance import FILE_NAME, load_candidates
+
+        cwd = Path(args.cwd).resolve()
+        if not (cwd / FILE_NAME).is_file():
+            print(f"No {FILE_NAME} in this working directory.", file=sys.stderr)
+            return 1
+        try:
+            candidates = load_candidates(cwd)
+        except (OSError, ValueError) as exc:
+            print(f"Invalid guidance file: {exc}", file=sys.stderr)
+            return 1
+        print(
+            f"Valid guidance file: {len(candidates)} current suggestion(s). No choices changed."
+        )
+        return 0
     try:
         store = Store(settle_data_dir(args.data_dir))
     except CopyPending as exc:

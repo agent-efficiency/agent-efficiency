@@ -52,6 +52,7 @@ def prepare(
     data_root: Path,
     *,
     clock: Callable[[], int] = time.perf_counter_ns,
+    reserve: int = 0,
 ) -> Prepared:
     """Return ``ready``, ``unavailable``, or ``degraded`` with one reason code."""
 
@@ -78,7 +79,10 @@ def prepare(
         if clock() - started > TIME_BUDGET_NS:
             return stopped("degraded", "timeout")
         rendered = render(
-            selection, by_name, indexes, allowance=ALLOWANCE - RESELECT_RESERVE
+            selection,
+            by_name,
+            indexes,
+            allowance=ALLOWANCE - RESELECT_RESERVE - min(500, max(0, reserve)),
         )
     except (KeyError, TypeError, OSError, RuntimeError, ValueError):
         # A hand-edited index can drop a field the generator always writes,

@@ -27,7 +27,7 @@ class ClaudeAdapter(BaseAdapter):
     native_events = frozenset(event_map)
     capabilities = {
         "SessionStart": ("add_context",),
-        "UserPromptSubmit": ("add_context", "notify"),
+        "UserPromptSubmit": ("add_context", "notify", "notice"),
         "PreToolUse": ("add_context", "deny_action"),
         "PostToolUse": ("add_context",),
         "PostToolUseFailure": ("add_context",),
@@ -45,6 +45,10 @@ class ClaudeAdapter(BaseAdapter):
     ) -> dict[str, Any] | None:
         if effect.effect == "none":
             return None
+        if effect.effect == "notice":
+            if "notice" not in self.capabilities.get(native_event, ()):
+                return None
+            return {"systemMessage": effect.user_message or "Agent Efficiency"}
         message = f"Agent Efficiency: {effect.agent_message}"
         if effect.effect == "continue_turn":
             return {"decision": "block", "reason": message}

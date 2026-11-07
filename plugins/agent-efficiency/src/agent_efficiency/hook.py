@@ -198,7 +198,24 @@ def _run_hook(
                 event_name=canonical_event.name,
                 capabilities=canonical_event.capabilities,
             )
-        return _on_prompt(
+        prompt = str(payload.get("prompt") or "")
+        # The user prompt event is the choice boundary. Tool input and model
+        # messages cannot reach this path. The CLI exposes no choice command.
+        from agent_efficiency import guidance
+
+        if guidance.is_control(prompt):
+            try:
+                return guidance.handle_control(
+                    active_store, session_id, host, Path(cwd), prompt, mode
+                )
+            except (OSError, ValueError, RuntimeError, sqlite3.Error):
+                return _control_output(
+                    host,
+                    "Agent Efficiency: the guidance choice could not be processed. "
+                    "No guidance was added. Check the local proposal file.",
+                )
+        request_key = _turn_key(payload, active_store, session_id, new_prompt=True)
+        output = _on_prompt(
             payload,
             active_store,
             session_id,
@@ -206,6 +223,24 @@ def _run_hook(
             mode,
             session_capability=session_capability,
         )
+        if not parse_control(prompt):
+            try:
+                output = guidance.merge_output(
+                    output,
+                    guidance.on_prompt(
+                        active_store,
+                        session_id,
+                        host,
+                        Path(cwd),
+                        prompt,
+                        mode,
+                        request_key=request_key,
+                    ),
+                )
+            except (OSError, ValueError, RuntimeError, sqlite3.Error):
+                # Optional suggestions cannot disable operational guidance.
+                pass
+        return output
 
     # Off means no lifecycle telemetry. Session state remains available solely
     # so a later prompt control can turn the same session back on.

@@ -99,6 +99,8 @@ class CursorAdapter(BaseAdapter):
     def render(
         self, effect: CanonicalEffect, *, native_event: str
     ) -> dict[str, Any] | None:
+        if effect.effect == "notice":
+            return None
         if effect.effect == "none":
             return None
         message = f"Agent Efficiency: {effect.agent_message}"

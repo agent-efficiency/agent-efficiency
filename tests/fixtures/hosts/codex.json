@@ -278,7 +278,8 @@
       "expected_canonical_event": "turn.prompted",
       "expected_capabilities": [
         "add_context",
-        "notify"
+        "notify",
+        "notice"
       ],
       "expected_native_output": null,
       "expected_safe_facts": {},
