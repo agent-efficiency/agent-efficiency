@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="An illustrated guide to Agent Efficiency 0.2.2: events, guidance, verification, vault context, privacy, and measurement.">
+<meta name="color-scheme" content="light">
+<title>How Agent Efficiency works</title>
+<style>
+:root {
+  --ink: oklch(0.25 0.025 270);
+  --muted: oklch(0.46 0.025 270);
+  --accent: oklch(0.45 0.18 270);
+  --accent-soft: oklch(0.96 0.018 270);
+  --context: oklch(0.43 0.085 175);
+  --context-soft: oklch(0.96 0.025 175);
+  --caution: oklch(0.43 0.10 60);
+  --caution-soft: oklch(0.97 0.025 75);
+  --line: oklch(0.83 0.02 270);
+  --surface: oklch(0.98 0.005 270);
+  --white: oklch(1 0 0);
+  font-family: "Noto Sans", "Segoe UI", Arial, sans-serif;
+  color: var(--ink); background: var(--white); font-synthesis: none;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 24px; }
+body { margin: 0; font-size: 16px; line-height: 1.65; }
+a { color: var(--accent); text-underline-offset: 3px; }
+a:hover { text-decoration-thickness: 2px; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
+button, summary { cursor: pointer; }
+button { font: inherit; }
+button:hover { background: var(--accent-soft); }
+.skip { position: absolute; top: -100px; left: 20px; padding: 10px 18px; background: var(--white); z-index: 2; }
+.skip:focus { top: 10px; }
+.masthead { border-bottom: 1px solid var(--line); }
+.masthead-inner { max-width: 1240px; margin: auto; padding: 20px 32px; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.identity { display: flex; align-items: center; gap: 12px; font-weight: 700; }
+.mark { display: grid; place-items: center; width: 36px; height: 36px; background: var(--accent); color: var(--white); border-radius: 6px; font-size: 14px; }
+.edition { font-size: 14px; color: var(--muted); font-weight: 400; }
+.print-button { border: 1px solid var(--line); border-radius: 6px; padding: 8px 14px; color: var(--ink); background: var(--white); white-space: nowrap; }
+.js-only { display: none; }
+.has-js .js-only { display: inline-block; }
+.layout { display: grid; grid-template-columns: 176px minmax(0, 1fr); gap: 56px; max-width: 1240px; margin: auto; padding: 48px 32px 64px; }
+.contents { align-self: start; position: sticky; top: 24px; }
+.contents h2 { margin: 0 0 10px; font-size: 15px; line-height: 1.4; }
+.contents ol { list-style: none; padding: 0; margin: 0; }
+.contents a { display: block; padding: 7px 10px; margin: 0 -10px; font-size: 14px; text-decoration: none; border-radius: 5px; color: var(--muted); }
+.contents a:hover, .contents a[aria-current="location"] { color: var(--accent); background: var(--accent-soft); }
+.contents .small { margin-top: 28px; }
+main, article { min-width: 0; }
+h1, h2, h3 { line-height: 1.2; text-wrap: balance; }
+h1 { font-size: clamp(2.25rem, 4.5vw, 3.3rem); letter-spacing: -0.025em; font-weight: 750; margin: 12px 0 22px; max-width: 20ch; }
+h2 { font-size: 1.9rem; letter-spacing: -0.02em; margin: 0 0 20px; }
+h3 { font-size: 1.15rem; margin: 30px 0 12px; }
+p, li, dd { text-wrap: pretty; }
+p { max-width: 73ch; margin: 0 0 18px; }
+ul, ol { padding-left: 23px; }
+li { margin-bottom: 7px; }
+.lead { font-size: 1.14rem; line-height: 1.65; max-width: 64ch; }
+.metadata { display: flex; flex-wrap: wrap; gap: 8px 18px; color: var(--muted); font-size: 14px; }
+.small, .source-line { font-size: 14px; line-height: 1.6; color: var(--muted); }
+.source-line { margin-top: 18px; }
+section { margin-top: 64px; padding-top: 10px; scroll-margin-top: 24px; }
+.definition { display: grid; grid-template-columns: 118px minmax(0, 1fr); gap: 9px 20px; margin: 25px 0; }
+.definition dt { font-weight: 700; }
+.definition dd { margin: 0; }
+.note { padding: 20px 24px; margin: 24px 0; background: var(--accent-soft); border-radius: 8px; }
+.note p:last-child { margin-bottom: 0; }
+.note.caution { background: var(--caution-soft); color: var(--caution); }
+figure { margin: 28px 0; }
+.diagram { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 12px; }
+.diagram svg { display: block; width: 100%; min-width: 740px; height: auto; }
+figcaption { margin-top: 12px; color: var(--muted); font-size: 14px; line-height: 1.6; max-width: 78ch; }
+.diagram-hint { display: none; color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+svg text { font-family: "Noto Sans", "Segoe UI", Arial, sans-serif; font-size: 17px; fill: var(--ink); }
+svg .label { font-size: 14px; fill: var(--muted); }
+svg .node-title { font-size: 18px; font-weight: 700; }
+svg .box { fill: var(--white); stroke: var(--line); stroke-width: 1.4; rx: 8px; }
+svg .accent-box { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.4; rx: 8px; }
+svg .context-box { fill: var(--context-soft); stroke: var(--context); stroke-width: 1.4; rx: 8px; }
+svg .caution-box { fill: var(--caution-soft); stroke: var(--caution); stroke-width: 1.4; rx: 8px; }
+svg .wire { fill: none; stroke: var(--accent); stroke-width: 2; }
+svg .context-wire { fill: none; stroke: var(--context); stroke-width: 2; }
+svg .boundary { fill: none; stroke: var(--line); stroke-width: 1.4; stroke-dasharray: 6 5; rx: 10px; }
+svg .lifeline { stroke: var(--line); stroke-width: 1.3; stroke-dasharray: 5 5; }
+.table-wrap { max-width: 100%; overflow-x: auto; margin: 24px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; text-align: left; }
+th, td { vertical-align: top; border-bottom: 1px solid var(--line); padding: 13px 12px; }
+th { font-weight: 700; background: var(--surface); }
+td:first-child { font-weight: 600; }
+.modes td:first-child { min-width: 95px; }
+.trace-table { min-width: 620px; }
+.trace-table .num { text-align: center; font-variant-numeric: tabular-nums; }
+.trace-table button { border: 1px solid transparent; border-radius: 5px; padding: 5px 8px; color: var(--accent); background: transparent; text-align: left; line-height: 1.4; }
+.trace-table button[aria-pressed="true"] { background: var(--accent); color: var(--white); }
+.trace-table button:disabled { cursor: default; }
+.trace-table tr[data-active="true"] { background: var(--accent-soft); }
+.trace-description { min-height: 5.8em; border: 1px solid var(--line); border-radius: 8px; padding: 16px 20px; }
+.trace-description p { margin: 0; }
+.inline-label { font-size: 13px; font-weight: 650; color: var(--accent); white-space: nowrap; }
+.two-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px; }
+.two-columns h3 { margin-top: 12px; }
+code, pre { font-family: "Adwaita Mono", "Cascadia Code", Consolas, monospace; font-size: 0.88em; }
+code { overflow-wrap: anywhere; }
+pre { background: var(--surface); padding: 20px 22px; border: 1px solid var(--line); border-radius: 8px; overflow: auto; line-height: 1.65; }
+pre code { font-size: 1em; overflow-wrap: normal; }
+details { margin: 20px 0; padding: 16px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+summary { font-weight: 650; color: var(--accent); padding: 4px 0; }
+details[open] summary { margin-bottom: 14px; }
+.equation { display: flex; flex-wrap: wrap; align-items: center; gap: 22px; padding: 24px 28px; background: var(--accent-soft); border-radius: 8px; }
+.fraction { text-align: center; max-width: 100%; }
+.fraction span { display: block; padding: 9px 0; }
+.fraction span:first-child { border-bottom: 1px solid var(--accent); font-weight: 650; }
+.equation .equals { color: var(--accent); font-size: 2rem; }
+.equation .result { max-width: 21ch; font-weight: 650; }
+.source-map td:first-child { width: 34%; }
+footer { margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+@media (max-width: 1000px) {
+  .layout { grid-template-columns: 150px minmax(0, 1fr); gap: 30px; padding-inline: 24px; }
+  .diagram-hint { display: block; }
+}
+@media (max-width: 760px) {
+  .masthead-inner { padding: 16px 20px; }
+  .identity { gap: 9px; }
+  .identity .edition { display: none; }
+  .layout { display: block; padding: 24px 20px 40px; }
+  .contents { position: static; margin-bottom: 36px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+  .contents ol { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+  .contents a { margin: 0; padding: 5px 0; }
+  .contents a[aria-current="location"] { background: transparent; text-decoration: underline; }
+  .contents .small { display: none; }
+  h1 { font-size: clamp(2.1rem, 7vw, 3rem); }
+  h2 { font-size: 1.65rem; }
+  section { margin-top: 46px; }
+  .two-columns { grid-template-columns: 1fr; gap: 8px; }
+  .definition { grid-template-columns: 95px minmax(0, 1fr); gap: 10px 12px; }
+  .note { padding: 18px; }
+  .diagram { padding: 8px; }
+  .equation { padding: 18px; gap: 12px; font-size: 14px; }
+  .equation .result { max-width: none; }
+  .metadata { gap: 5px 12px; font-size: 13px; }
+  .source-map { min-width: 570px; }
+  .host-table { min-width: 650px; }
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+@media print {
+  @page { size: A4; margin: 16mm; }
+  html { scroll-behavior: auto; }
+  body { font-size: 10pt; line-height: 1.5; }
+  .skip, .contents, .print-button, .diagram-hint, .trace-instruction { display: none !important; }
+  .masthead-inner { padding: 0 0 10pt; }
+  .layout { display: block; padding: 20pt 0 0; max-width: none; }
+  h1 { font-size: 30pt; max-width: none; }
+  h2 { font-size: 20pt; }
+  h3 { font-size: 12pt; }
+  .lead { font-size: 12pt; }
+  section { margin-top: 28pt; padding-top: 0; }
+  h2, h3, summary { break-after: avoid; }
+  figure, pre, .note, .equation, .trace-description { break-inside: avoid; }
+  .two-columns, .trace-table, .modes, .host-table, .source-map, #sources { break-inside: avoid; }
+  p, li { orphans: 3; widows: 3; }
+  .diagram, .table-wrap { overflow: visible; }
+  .diagram svg, table { min-width: 0 !important; width: 100%; }
+  .diagram { padding: 7pt; }
+  .table-wrap, figure { margin: 16pt 0; }
+  table, .source-map { font-size: 8.5pt; }
+  th, td { padding: 7pt 6pt; }
+  tr { break-inside: avoid; }
+  thead { display: table-header-group; }
+  .trace-table button { color: var(--ink) !important; background: transparent !important; padding: 0; border: 0; }
+  .trace-table tr { background: transparent !important; }
+  .trace-description { display: none; }
+  .metadata, .small, figcaption, .source-line { font-size: 9pt; }
+  .note, .equation, .diagram, th, .mark { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .two-columns { gap: 20pt; }
+  a { color: var(--ink); }
+  footer { font-size: 8pt; }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to the document</a>
+<div class="masthead"><div class="masthead-inner">
+  <div class="identity"><span class="mark" aria-hidden="true">AE</span><span>Agent Efficiency</span><span class="edition">Technical guide</span></div>
+  <button type="button" class="print-button js-only" id="print-document">Print / Save PDF</button>
+</div></div>
+<div class="layout">
+<nav class="contents" aria-label="Document contents">
+  <h2>In this document</h2>
+  <ol>
+    <li><a href="#overview">The whole system</a></li>
+    <li><a href="#events">Events and counting</a></li>
+    <li><a href="#guidance">Guidance and modes</a></li>
+    <li><a href="#verification">Verification receipts</a></li>
+    <li><a href="#vault">Vault context</a></li>
+    <li><a href="#privacy">Storage and privacy</a></li>
+    <li><a href="#hosts">Host differences</a></li>
+    <li><a href="#measurement">Measuring results</a></li>
+    <li><a href="#operations">Using the system</a></li>
+    <li><a href="#sources">Source map</a></li>
+  </ol>
+  <p class="small">One file. No external libraries, fonts, or images are required. Source links open GitHub.</p>
+</nav>
+<main id="main"><article>
+<header>
+  <div class="metadata"><span>Version 0.2.2</span><span>Database schema 8</span><span>7 November 2026</span></div>
+  <h1>How Agent Efficiency works</h1>
+  <p class="lead">Agent Efficiency is a local plugin for Claude Code, Codex, and Cursor. It watches session events, gives short guidance from fixed rules, and records whether configured checks passed for the current code.</p>
+  <p>It runs when a host calls a hook or you use its terminal command. The monitoring path uses the Python standard library and SQLite. It makes no model calls or network requests.</p>
+</header>
+
+<section id="overview" aria-labelledby="overview-title">
+<h2 id="overview-title">The whole system</h2>
+<p>A <strong>hook</strong> is a local command the coding-agent application runs when something happens, such as a tool call or the end of a turn. An <strong>adapter</strong> translates each host’s event format into the shared runtime’s format. The same runtime then handles counting, guidance, verification state, and optional vault context.</p>
+<figure>
+<div class="diagram" tabindex="0" role="region" aria-label="System diagram, horizontally scrollable on small screens">
+<svg viewBox="0 0 900 505" role="img" aria-labelledby="system-title system-desc">
+<title id="system-title">Host events pass through a local hook process</title>
+<desc id="system-desc">The host sends an event to an adapter. The runtime classifies it, updates shared state, selects guidance, and renders a host response. A local SQLite database is shared with the terminal command. Optional vault files supply context to the renderer.</desc>
+<defs>
+<marker id="arrow-system" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10Z" fill="var(--accent)"/></marker>
+<marker id="arrow-vault-system" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="var(--context)"/></marker>
+</defs>
+<rect x="215" y="80" width="665" height="220" class="boundary"/>
+<text x="235" y="108" class="label">Local hook process: handles one event, then exits</text>
+<path d="M775 155 V35 H100 V155" class="wire" marker-end="url(#arrow-system)"/>
+<text x="450" y="26" text-anchor="middle" class="label">Optional host response: guidance, context, or a bounded continuation</text>
+<rect x="20" y="155" width="165" height="100" class="accent-box"/>
+<text x="102" y="184" text-anchor="middle" class="node-title">Agent host</text><text x="102" y="210" text-anchor="middle">Claude / Codex</text><text x="102" y="234" text-anchor="middle">/ Cursor</text>
+<path d="M185 205 H240" class="wire" marker-end="url(#arrow-system)"/>
+<rect x="240" y="155" width="165" height="100" class="box"/>
+<text x="322" y="186" text-anchor="middle" class="node-title">Translate</text><text x="322" y="214" text-anchor="middle">Host event into</text><text x="322" y="237" text-anchor="middle">shared facts</text>
+<path d="M405 205 H455" class="wire" marker-end="url(#arrow-system)"/>
+<rect x="455" y="155" width="170" height="100" class="box"/>
+<text x="540" y="186" text-anchor="middle" class="node-title">Update state</text><text x="540" y="214" text-anchor="middle">Count calls and</text><text x="540" y="237" text-anchor="middle">resolve outcomes</text>
+<path d="M625 205 H675" class="wire" marker-end="url(#arrow-system)"/>
+<rect x="675" y="155" width="185" height="100" class="box"/>
+<text x="767" y="186" text-anchor="middle" class="node-title">Select &amp; render</text><text x="767" y="214" text-anchor="middle">Apply rules and</text><text x="767" y="237" text-anchor="middle">host capabilities</text>
+<path d="M540 255 V365" class="wire" marker-start="url(#arrow-system)" marker-end="url(#arrow-system)"/>
+<text x="554" y="333" class="label">Facts and state</text>
+<rect x="420" y="365" width="240" height="90" class="accent-box"/>
+<text x="540" y="399" text-anchor="middle" class="node-title">Shared SQLite store</text><text x="540" y="427" text-anchor="middle">Counts, state, receipts</text>
+<rect x="20" y="365" width="220" height="90" class="box"/>
+<text x="130" y="399" text-anchor="middle" class="node-title">Terminal command</text><text x="130" y="427" text-anchor="middle">Checks and reports</text>
+<path d="M240 410 H420" class="wire" marker-start="url(#arrow-system)" marker-end="url(#arrow-system)"/>
+<text x="330" y="396" text-anchor="middle" class="label">Same data folder</text>
+<rect x="705" y="365" width="175" height="90" class="context-box"/>
+<text x="792" y="399" text-anchor="middle" class="node-title">Vault files</text><text x="792" y="427" text-anchor="middle">Optional notes</text>
+<path d="M792 365 V255" class="context-wire" marker-end="url(#arrow-vault-system)"/>
+<text x="800" y="333" class="label">Context</text>
+<text x="20" y="488" class="label">The Claude Code status line can also add host-reported cost and token totals to the store.</text>
+</svg></div>
+<p class="diagram-hint">Scroll inside the diagram to read it at full size.</p>
+<figcaption>The database joins otherwise separate hook invocations. Each installed host copy and the terminal command use the same selected data folder. Not every event runs every part of the runtime.</figcaption>
+</figure>
+<dl class="definition">
+<dt>Session</dt><dd>A conversation in a coding-agent host.</dd>
+<dt>Turn</dt><dd>One user prompt and the work the agent performs before stopping.</dd>
+<dt>Receipt</dt><dd>A structured record of an operation or decision. Verification receipts record check results; vault receipts record context-delivery decisions.</dd>
+</dl>
+<p class="source-line">Source: <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/docs/architecture.md">architecture</a> and <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/plugins/agent-efficiency/src/agent_efficiency/hook.py">hook dispatcher</a>.</p>
+</section>
+
+<section id="events" aria-labelledby="events-title">
+<h2 id="events-title">Events become a session history</h2>
+<p>At session start, the runtime records the session and pins a guidance pack. A <strong>pack</strong> is a local, versioned set of guidance cards. Pinning its digest, a hash used to identify its contents, keeps the session on the same cards even if another pack becomes available.</p>
+<figure>
+<div class="diagram" tabindex="0" role="region" aria-label="Event sequence, horizontally scrollable on small screens">
+<svg viewBox="0 0 900 485" role="img" aria-labelledby="events-svg-title events-svg-desc">
+<title id="events-svg-title">A session contains repeated tool calls and stop decisions</title>
+<desc id="events-svg-desc">The host sends session and prompt events. The hook opens the session and pins guidance. Each tool call has a before event and a result event. The hook counts the invocation and resolves its outcome once. At stop, it may ask the host to continue within the configured limits.</desc>
+<defs><marker id="arrow-events" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="var(--accent)"/></marker></defs>
+<rect x="35" y="15" width="160" height="45" class="accent-box"/><text x="115" y="44" text-anchor="middle" class="node-title">Host</text>
+<rect x="360" y="15" width="180" height="45" class="box"/><text x="450" y="44" text-anchor="middle" class="node-title">Hook runtime</text>
+<rect x="705" y="15" width="160" height="45" class="accent-box"/><text x="785" y="44" text-anchor="middle" class="node-title">Shared store</text>
+<path d="M115 60 V460 M450 60 V460 M785 60 V460" class="lifeline"/>
+<path d="M115 110 H450" class="wire" marker-end="url(#arrow-events)"/><text x="282" y="96" text-anchor="middle">Session start</text>
+<path d="M450 145 H785" class="wire" marker-end="url(#arrow-events)"/><text x="617" y="130" text-anchor="middle">Open session, pin pack</text>
+<path d="M115 170 H450" class="wire" marker-end="url(#arrow-events)"/><text x="282" y="157" text-anchor="middle">Prompt starts a turn</text>
+<rect x="20" y="180" width="860" height="165" class="boundary"/><text x="35" y="204" class="label">Repeat for each tool invocation</text>
+<path d="M115 238 H450" class="wire" marker-end="url(#arrow-events)"/><text x="282" y="225" text-anchor="middle">Before tool</text>
+<path d="M450 258 H785" class="wire" marker-end="url(#arrow-events)"/><text x="617" y="243" text-anchor="middle">Classify and count</text>
+<path d="M115 300 H450" class="wire" marker-end="url(#arrow-events)"/><text x="282" y="285" text-anchor="middle">Success / failure / batch result</text>
+<path d="M450 325 H785" class="wire" marker-end="url(#arrow-events)"/><text x="617" y="311" text-anchor="middle">Resolve outcome once</text>
+<path d="M115 395 H450" class="wire" marker-end="url(#arrow-events)"/><text x="282" y="379" text-anchor="middle">Agent tries to stop</text>
+<path d="M450 445 H115" class="wire" marker-end="url(#arrow-events)"/><text x="282" y="429" text-anchor="middle">Allow stop or request continuation</text>
+</svg></div>
+<p class="diagram-hint">Scroll inside the diagram to read it at full size.</p>
+<figcaption>Guidance can also be emitted on supported prompt and tool events. A stop does not necessarily end the session. Another prompt can start the next turn.</figcaption>
+</figure>
+<h3>Several reports can describe one invocation</h3>
+<p>Schema 8 separates “a tool was called” from “its result was resolved.” A pre-tool event, a result event, and a later batch report can all refer to the same call. Matching reports update the same accounting result. When the host provides a call identifier, the runtime uses its digest to keep identical calls distinct.</p>
+<p class="trace-instruction js-only">Select an event to follow this illustrative trace. It is an explanation of the rules, not live telemetry.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Illustrative tool-event trace">
+<table class="trace-table">
+<caption class="small" style="text-align:left;padding-bottom:10px">Two invocations of the same action, each with a failed result</caption>
+<thead><tr><th scope="col">Event</th><th scope="col">Invocation</th><th scope="col" class="num">Total calls</th><th scope="col" class="num">Resolved calls</th><th scope="col" class="num">Failures</th></tr></thead>
+<tbody>
+<tr><td><button type="button" data-trace="0" aria-controls="trace-description" aria-pressed="false" disabled>1. PreToolUse</button></td><td>A starts</td><td class="num">1</td><td class="num">0</td><td class="num">0</td></tr>
+<tr><td><button type="button" data-trace="1" aria-controls="trace-description" aria-pressed="false" disabled>2. PostToolUseFailure</button></td><td>A fails</td><td class="num">1</td><td class="num">1</td><td class="num">1</td></tr>
+<tr data-active="true"><td><button type="button" data-trace="2" aria-controls="trace-description" aria-pressed="true" disabled>3. PostToolBatch</button></td><td>A reported again</td><td class="num">1</td><td class="num">1</td><td class="num">1</td></tr>
+<tr><td><button type="button" data-trace="3" aria-controls="trace-description" aria-pressed="false" disabled>4. PreToolUse</button></td><td>B starts</td><td class="num">2</td><td class="num">1</td><td class="num">1</td></tr>
+<tr><td><button type="button" data-trace="4" aria-controls="trace-description" aria-pressed="false" disabled>5. PostToolUseFailure</button></td><td>B fails</td><td class="num">2</td><td class="num">2</td><td class="num">2</td></tr>
+</tbody>
+</table></div>
+<div id="trace-description" class="trace-description" aria-live="polite" aria-atomic="true"><p><strong>Event 3: a duplicate report.</strong> The batch result describes invocation A again. Calls, resolved calls, and failures all stay at 1. A repeated host report is not a second attempt.</p></div>
+<p class="small">Without a host call identifier, matching falls back to action fingerprints and separate success/failure handling. Accounting depends on the events the host actually supplies. Historical counts are not recalculated by the schema 8 migration.</p>
+<p class="source-line">Source: <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/tests/test_call_counting.py">counting fixtures</a> and <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/plugins/agent-efficiency/src/agent_efficiency/store.py">store transactions</a>.</p>
+</section>
+
+<section id="guidance" aria-labelledby="guidance-title">
+<h2 id="guidance-title">Guidance is selected by rules</h2>
+<p>The runtime classifies the task and tool activity locally. Fixed policies look for signals such as repeated actions, repeated failures, broad searches, repeated installs, or a code edit followed by a stop without observed validation. Task guidance cards add short instructions for substantial build, research, and review work.</p>
+<p>The renderer checks what the host supports at that event. It can add context, notify, or ask for a bounded continuation. An unsupported effect falls back to a supported response or no response. A monitoring error lets the coding agent continue.</p>
+<div class="table-wrap"><table class="modes">
+<thead><tr><th scope="col">Mode</th><th scope="col">What happens</th><th scope="col">Vault context</th></tr></thead>
+<tbody>
+<tr><td><code>off</code></td><td>No normal lifecycle telemetry or guidance. Hooks still recognize exact control messages.</td><td>Not read or added.</td></tr>
+<tr><td><code>observe</code></td><td>Records facts and silent guidance selections. Adds no guidance.</td><td>Selected and counted, not added.</td></tr>
+<tr><td><code>advise</code><br><span class="inline-label">Default</span></td><td>Adds short guidance. It can ask for validation when an edited turn stops without an observed check.</td><td>Added on supported events.</td></tr>
+<tr><td><code>guard</code></td><td>Uses configured required checks and current receipts when deciding whether to request a continuation.</td><td>Added on supported events.</td></tr>
+</tbody>
+</table></div>
+<div class="note"><p><strong>Guidance has a budget.</strong> A policy note appears at most once per turn, with a combined advice limit of 3 messages per turn and 8 per session. Vault context has a separate allowance. These bounds limit added context; they do not establish a cost saving.</p></div>
+<h3>Guard needs project consent</h3>
+<p>The repository must set <code>mode = "guard"</code> in <code>agent-efficiency.toml</code> and define a check required for code changes. When an edited turn stops, an applicable required check without a current passing receipt can trigger one request to continue and run the exact check command. The host must support continuation, and the continuation limit must still permit it.</p>
+<p>Guard does not run the check itself. It does not guarantee that the agent follows the request or that the configured checks fully cover the task.</p>
+<p class="source-line">Source: <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/docs/modes.md">modes</a>, <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/plugins/agent-efficiency/src/agent_efficiency/interventions.py">effect rendering</a>, and <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/plugins/agent-efficiency/src/agent_efficiency/hook.py">stop handling</a>.</p>
+</section>
+
+<section id="verification" aria-labelledby="verification-title">
+<h2 id="verification-title">A receipt ties a check to the code</h2>
+<p>Seeing a test command in a session is an activity signal. A <strong>verification receipt</strong> is stronger evidence: Agent Efficiency ran a configured command and recorded its result against a known workspace state.</p>
+<figure>
+<div class="diagram" tabindex="0" role="region" aria-label="Verification and freshness diagram, horizontally scrollable on small screens">
+<svg viewBox="0 0 900 480" role="img" aria-labelledby="receipt-title receipt-desc">
+<title id="receipt-title">Run a check, then evaluate whether its receipt is current</title>
+<desc id="receipt-desc">Configuration and workspace state feed the check command. It records a receipt after comparing state before and after execution. Later, the latest receipt is compared with the current workspace, configuration, and optional age limit. A passing matching receipt is current. A changed or expired passing receipt is stale. Other states retain their own meaning.</desc>
+<defs><marker id="arrow-receipt" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="var(--accent)"/></marker></defs>
+<rect x="20" y="20" width="250" height="100" class="box"/>
+<text x="145" y="50" text-anchor="middle" class="node-title">Inputs</text><text x="145" y="78" text-anchor="middle">Project configuration</text><text x="145" y="103" text-anchor="middle">and workspace state</text>
+<path d="M270 70 H325" class="wire" marker-end="url(#arrow-receipt)"/>
+<rect x="325" y="20" width="245" height="100" class="accent-box"/>
+<text x="447" y="50" text-anchor="middle" class="node-title">Run the check</text><text x="447" y="78" text-anchor="middle">Argument array, no shell</text><text x="447" y="103" text-anchor="middle">Compare before / after</text>
+<path d="M570 70 H625" class="wire" marker-end="url(#arrow-receipt)"/>
+<rect x="625" y="20" width="255" height="100" class="box"/>
+<text x="752" y="50" text-anchor="middle" class="node-title">Store the receipt</text><text x="752" y="78" text-anchor="middle">Result, digests, commit</text><text x="752" y="103" text-anchor="middle">and times; no output</text>
+<path d="M752 120 V170 H450 V215" class="wire" marker-end="url(#arrow-receipt)"/>
+<text x="55" y="196" class="label">Later: evidence query or guard stop check</text>
+<rect x="215" y="215" width="470" height="90" class="accent-box"/>
+<text x="450" y="248" text-anchor="middle" class="node-title">Compare the receipt with today’s state</text>
+<text x="450" y="276" text-anchor="middle">Workspace + check settings + optional age limit</text>
+<path d="M450 305 V338 H150 V375" class="wire" marker-end="url(#arrow-receipt)"/>
+<path d="M450 338 V375" class="wire" marker-end="url(#arrow-receipt)"/>
+<path d="M450 338 H750 V375" class="wire" marker-end="url(#arrow-receipt)"/>
+<rect x="20" y="375" width="260" height="85" class="context-box"/>
+<text x="150" y="407" text-anchor="middle" class="node-title">current</text><text x="150" y="435" text-anchor="middle">Pass, matching state, in date</text>
+<rect x="320" y="375" width="260" height="85" class="caution-box"/>
+<text x="450" y="407" text-anchor="middle" class="node-title">stale</text><text x="450" y="435" text-anchor="middle">Pass, but changed or expired</text>
+<rect x="620" y="375" width="260" height="85" class="box"/>
+<text x="750" y="403" text-anchor="middle" class="node-title">Other states</text><text x="750" y="428" text-anchor="middle">missing, fail, blocked,</text><text x="750" y="451" text-anchor="middle">or inconclusive</text>
+</svg></div>
+<p class="diagram-hint">Scroll inside the diagram to read it at full size.</p>
+<figcaption>Only a current passing receipt satisfies a required check. A passing exit code is insufficient if the check changed the workspace or the workspace could not be read.</figcaption>
+</figure>
+<div class="two-columns">
+<div><h3>What is bound to the receipt</h3><ul>
+<li>The full Git commit.</li><li>Tracked changes and relevant untracked file content.</li><li>The project’s verification configuration and check identity.</li><li>The result, exit status, and completion time.</li>
+</ul></div>
+<div><h3>What each run can return</h3><ul>
+<li><code>pass</code>: exit 0 and unchanged, readable state.</li><li><code>fail</code>: a nonzero command exit status.</li><li><code>blocked</code>: timeout or failure to start.</li><li><code>inconclusive</code>: state is unreadable or changed during the check.</li>
+</ul></div>
+</div>
+<details><summary>A minimal configured check</summary>
+<p>This goes in <code>agent-efficiency.toml</code> at the root of a Git repository. The command is an array of arguments. Use the test command that applies to your project.</p>
+<pre><code>version = 1
+mode = "advise"
+
+[[checks]]
+id = "unit"
+command = ["python", "-m", "unittest", "discover", "-s", "tests"]
+applies_to = ["**/*.py"]
+required_for = ["code"]
+timeout_seconds = 300</code></pre>
+<pre><code>agent-efficiency check unit
+agent-efficiency evidence list</code></pre>
+<p>The check’s output streams to the terminal and is not stored. The configured command can have its own side effects, permissions, or network access. It is not sandboxed by the receipt system.</p>
+</details>
+<p class="small">Ignored files and contents inside the recognized tool-cache directories are excluded from workspace tracking under the documented rules. A current receipt establishes the configured check’s result, not complete task acceptance or an absence of defects.</p>
+<p class="source-line">Source: <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/docs/verification.md">verification guide</a>, <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/plugins/agent-efficiency/src/agent_efficiency/verification/runner.py">check runner</a>, and <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/plugins/agent-efficiency/src/agent_efficiency/verification/receipts.py">receipt freshness</a>.</p>
+</section>
+
+<section id="vault" aria-labelledby="vault-title">
+<h2 id="vault-title">Vault context is a separate channel</h2>
+<p>A <strong>vault</strong> is a local Git repository of notes you maintain. Registered vault trees have indexes. Selection matches the current project using paths, repository metadata, and branches. The selector reads local metadata without starting Git or opening note bodies.</p>
+<figure>
+<div class="diagram" tabindex="0" role="region" aria-label="Vault data flow, horizontally scrollable on small screens">
+<svg viewBox="0 0 900 370" role="img" aria-labelledby="vault-svg-title vault-svg-desc">
+<title id="vault-svg-title">Vault text reaches the agent; only a decision record reaches SQLite</title>
+<desc id="vault-svg-desc">Registered files and indexes feed scope selection, then rendering within a 9000-character allowance. Selected text is returned as host context. A separate branch stores counts, two digests, and fixed codes in a vault receipt. No note text or vault paths enter that receipt.</desc>
+<defs>
+<marker id="arrow-vault" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="var(--context)"/></marker>
+<marker id="arrow-vault-facts" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="var(--accent)"/></marker>
+</defs>
+<rect x="20" y="25" width="250" height="100" class="context-box"/>
+<text x="145" y="57" text-anchor="middle" class="node-title">Vault files</text><text x="145" y="85" text-anchor="middle">Registration + indexes</text><text x="145" y="110" text-anchor="middle">Notes stay in your trees</text>
+<path d="M270 75 H325" class="context-wire" marker-end="url(#arrow-vault)"/>
+<rect x="325" y="25" width="245" height="100" class="box"/>
+<text x="447" y="57" text-anchor="middle" class="node-title">Select scope</text><text x="447" y="85" text-anchor="middle">Paths, repositories,</text><text x="447" y="110" text-anchor="middle">and branches</text>
+<path d="M570 75 H625" class="context-wire" marker-end="url(#arrow-vault)"/>
+<rect x="625" y="25" width="255" height="100" class="context-box"/>
+<text x="752" y="57" text-anchor="middle" class="node-title">Render context</text><text x="752" y="85" text-anchor="middle">Project note, then summaries</text><text x="752" y="110" text-anchor="middle">Up to 9,000 characters</text>
+<path d="M700 125 V178 H210 V235" class="context-wire" marker-end="url(#arrow-vault)"/>
+<text x="325" y="164" class="label">Selected text, on a supported event</text>
+<path d="M795 125 V235" class="wire" marker-end="url(#arrow-vault-facts)"/>
+<text x="805" y="196" class="label">Facts</text>
+<rect x="20" y="235" width="380" height="100" class="context-box"/>
+<text x="210" y="269" text-anchor="middle" class="node-title">Host context</text><text x="210" y="297" text-anchor="middle">The agent can read the selected notes</text><text x="210" y="322" text-anchor="middle">through its normal session context</text>
+<rect x="535" y="235" width="345" height="100" class="accent-box"/>
+<text x="707" y="269" text-anchor="middle" class="node-title">SQLite vault receipt</text><text x="707" y="297" text-anchor="middle">Counts, two digests, fixed codes</text><text x="707" y="322" text-anchor="middle">No note text or vault paths</text>
+</svg></div>
+<p class="diagram-hint">Scroll inside the diagram to read it at full size.</p>
+<figcaption>Vault text is intentionally sent to the agent as context. Keeping it out of the Agent Efficiency database does not keep it out of the host’s normal context processing.</figcaption>
+</figure>
+<p>Rendering places a matched project note first, then short summaries of other active notes that fit. The whole rendered context has a 9,000-character allowance, separate from the advice budget. Resume delivery occurs only when the rendered text changed. An explicit vault request reselects the notes.</p>
+<p>After compaction, Claude Code and Codex receive replacement context at the compact session-start event. Cursor receives it at the next successful tool result. A receipt transaction prevents two racing events from claiming the same pending delivery. A vault failure lets the session continue without that context.</p>
+<p class="source-line">Source: <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/docs/vault.md">vault guide</a>, <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/plugins/agent-efficiency/src/agent_efficiency/vault/prepare.py">context preparation</a>, and <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/plugins/agent-efficiency/src/agent_efficiency/vault_delivery.py">delivery</a>.</p>
+</section>
+
+<section id="privacy" aria-labelledby="privacy-title">
+<h2 id="privacy-title">What the local database stores</h2>
+<p>The hook may inspect input content in memory to classify it. The database keeps controlled facts and digests rather than the original prompt, command, code, or output. A digest helps compare values without storing their source text; it is not a guarantee of anonymity.</p>
+<div class="two-columns">
+<div><h3>In the database</h3><ul>
+<li>Session and turn state; host and model names.</li><li>Project folder names and project keys.</li><li>Action classes, fingerprints, counts, and durations.</li><li>Guidance decisions, ratings, and bounded outcomes.</li><li>Verification and vault decision receipts.</li><li>Cost and token totals when the host supplies them.</li>
+</ul></div>
+<div><h3>Not in the database</h3><ul>
+<li>Prompt text, source code, or patches.</li><li>Raw commands, tool output, or check output.</li><li>Assistant messages, transcripts, or environment values.</li><li>Vault note text, note IDs, titles, or summaries.</li><li>Vault paths, remotes, or branches.</li><li>Experiment evidence content or its location.</li>
+</ul></div>
+</div>
+<h3>One shared data folder</h3>
+<p>The terminal command and all hosts resolve the folder in this order: <code>--data-dir</code>, then <code>AGENT_EFFICIENCY_DATA</code>, then <code>$XDG_DATA_HOME/agent-efficiency</code>, then <code>~/.local/share/agent-efficiency</code>.</p>
+<pre aria-label="Data folder contents"><code>agent-efficiency/
+  agent-efficiency.db          session facts and receipts
+  agent-efficiency.db-wal      SQLite journal, when present
+  agent-efficiency.db-shm      SQLite coordination, when present
+  agent-efficiency.db.schema-N.bak
+                              pre-upgrade database backup
+  vault.json                  registered vault paths, outside SQLite
+  knowledge/                  retained guidance packs</code></pre>
+<p>SQLite transactions protect updates from concurrent hook processes. Newly created data directories use owner-only access, as do new data files. Existing directories keep their permissions; <code>doctor</code> reports readable or shared entries.</p>
+<div class="note caution"><p><strong>Metadata still matters.</strong> Folder names, model names, timestamps, and counts can reveal details about work. The store is local operational data, not an anonymous public dataset.</p></div>
+<p class="source-line">Source: <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/docs/privacy.md">privacy guide</a> and <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/plugins/agent-efficiency/src/agent_efficiency/paths.py">data-folder selection and permissions</a>.</p>
+</section>
+
+<section id="hosts" aria-labelledby="hosts-title">
+<h2 id="hosts-title">Shared logic, different host events</h2>
+<p>The adapters preserve the same intent while respecting each host’s event and response formats. This table describes the integration shipped in version 0.2.2.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Host differences"><table class="host-table">
+<thead><tr><th scope="col">Behavior</th><th scope="col">Claude Code</th><th scope="col">Codex</th><th scope="col">Cursor</th></tr></thead>
+<tbody>
+<tr><td>Event naming</td><td>Names such as <code>SessionStart</code> and <code>PostToolUse</code>.</td><td>Similar lifecycle names, plus <code>PermissionRequest</code>.</td><td>Names such as <code>sessionStart</code> and <code>postToolUse</code>; mapped to shared events.</td></tr>
+<tr><td>Prompt context</td><td>Can add context at the prompt.</td><td>Can add context at the prompt.</td><td>Prompt events cannot carry added context. Vault requests wait for a successful tool result.</td></tr>
+<tr><td>After compaction</td><td>Deliver at compact <code>SessionStart</code>.</td><td>Deliver at compact <code>SessionStart</code>.</td><td>Deliver at the next successful tool result.</td></tr>
+<tr><td>Stop continuation</td><td>Rendered as a stop-block response.</td><td>Rendered as a stop-block response.</td><td>Rendered as a follow-up message.</td></tr>
+<tr><td>Cost and tokens</td><td>Available through the status-line integration when supplied.</td><td>Missing cost fields remain unavailable.</td><td>Missing cost fields remain unavailable.</td></tr>
+</tbody>
+</table></div>
+<p>The <code>PermissionRequest</code> event is recognized for Codex, but the runtime does not decide its approvals. Cursor cloud sessions without a session-start event receive deferred vault context on their first successful tool result.</p>
+<p class="small">Each plugin manifest names a separate host hook file. An installed file, matching schema, or successful fixture smoke test does not establish that a live host loaded the plugin.</p>
+<p class="source-line">Source: the <a href="https://github.com/agent-efficiency/agent-efficiency/tree/v0.2.2/plugins/agent-efficiency/src/agent_efficiency/adapters">three adapters</a>, <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/plugins/agent-efficiency/src/agent_efficiency/statusline.py">status-line integration</a>, and <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/docs/schema-8-release-review.md">live-host review procedure</a>.</p>
+</section>
+
+<section id="measurement" aria-labelledby="measurement-title">
+<h2 id="measurement-title">Measure the cost of an accepted result</h2>
+<p>Fewer tool calls or less context can be useful signals. They do not prove that a task became cheaper or better. The project’s target is the total cost of reaching a verified, accepted result, including failed work and the cost of the monitoring itself.</p>
+<figure>
+<div class="equation" role="img" aria-label="Total observed cohort cost, including failed attempts, divided by verified accepted tasks equals observed cost per accepted task">
+<div class="fraction"><span>Total observed cohort cost, including failed attempts</span><span>Number of verified accepted tasks</span></div><span class="equals" aria-hidden="true">=</span><span class="result">Observed cost per accepted task</span>
+</div>
+<figcaption>Compare matched tasks. Keep unavailable cost fields unavailable. Report time, defects, review effort, and money separately rather than combining them into an invented score.</figcaption>
+</figure>
+<p>The experiment ledger can compare <code>observe</code> and <code>advise</code> cohorts, meaning groups of comparable sessions assigned to those modes. Comparisons match task class, project key, task-set digest, host, model, and agent profile. Accepted outcomes need an explicit evidence type and digest.</p>
+<p>Enrollment, ratings, and outcomes are retained. Exclusions get explicit reasons. Failed and abandoned work must not disappear from the cost of the comparison. Observed differences are not proof of causation.</p>
+<div class="note"><p><strong>What this guide establishes:</strong> how the released implementation works. It does not establish reduced cost, better acceptance rates, or successful activation in a particular live host.</p></div>
+<p class="source-line">Source: <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/docs/measurement.md">measurement protocol</a> and <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/docs/reports.md">report definitions</a>. The separate vault experiment work is not part of this release.</p>
+</section>
+
+<section id="operations" aria-labelledby="operations-title">
+<h2 id="operations-title">Using the system</h2>
+<div class="table-wrap"><table>
+<thead><tr><th scope="col">Command</th><th scope="col">What it tells you or does</th></tr></thead>
+<tbody>
+<tr><td><code>agent-efficiency doctor</code></td><td>Inspects the environment, data permissions, installed copies, and schema compatibility.</td></tr>
+<tr><td><code>agent-efficiency status</code></td><td>Shows recorded session state and signals.</td></tr>
+<tr><td><code>agent-efficiency check unit</code></td><td>Runs the configured <code>unit</code> check and records its result.</td></tr>
+<tr><td><code>agent-efficiency evidence list</code></td><td>Compares the latest receipts with the current workspace.</td></tr>
+<tr><td><code>agent-efficiency report</code></td><td>Summarizes observed activity and available measurements.</td></tr>
+</tbody>
+</table></div>
+<p>Within an active session, exact control messages such as <code>$agent-efficiency observe</code>, <code>$agent-efficiency on</code>, and <code>$agent-efficiency off</code> change that session’s mode. They are ordinary chat messages. <code>on</code> selects <code>advise</code>; project guard consent can make the effective mode <code>guard</code>.</p>
+<div class="note caution"><p><strong>Version 0.2.2 uses schema 8.</strong> Older runtimes cannot open an upgraded database. Update the terminal command and every active host copy together. Stop writers, keep a complete backup, rehearse on a copy, then verify the installed versions and new host sessions. Follow the <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/docs/schema-8-upgrade.md">upgrade and rollback guide</a>.</p></div>
+<p class="small">Doctor’s matching schema check is a compatibility check. It does not prove identical builds or live hook activation. A normal CLI invocation may initialize the selected data folder; it is not a substitute for the controlled upgrade procedure.</p>
+</section>
+
+<section id="sources" aria-labelledby="sources-title">
+<h2 id="sources-title">Source map</h2>
+<p>This guide follows the <a href="https://github.com/agent-efficiency/agent-efficiency/releases/tag/v0.2.2">published 0.2.2 release</a>, commit <code>dfe257ac35fd38a1a55f70cf0ccfe894b170d76f</code>. The links are pinned to that release rather than the moving main branch.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Implementation source map"><table class="source-map">
+<thead><tr><th scope="col">Part</th><th scope="col">Where to read</th></tr></thead>
+<tbody>
+<tr><td>Hook entry and error boundary</td><td><a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/plugins/agent-efficiency/src/agent_efficiency/hook_entry.py"><code>hook_entry.py</code></a></td></tr>
+<tr><td>Lifecycle decisions</td><td><a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/plugins/agent-efficiency/src/agent_efficiency/hook.py"><code>hook.py</code></a></td></tr>
+<tr><td>Host translation</td><td><a href="https://github.com/agent-efficiency/agent-efficiency/tree/v0.2.2/plugins/agent-efficiency/src/agent_efficiency/adapters"><code>adapters/</code></a> and <a href="https://github.com/agent-efficiency/agent-efficiency/tree/v0.2.2/plugins/agent-efficiency/src/agent_efficiency/contracts"><code>contracts/</code></a></td></tr>
+<tr><td>Rules and task guidance</td><td><a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/plugins/agent-efficiency/src/agent_efficiency/policy.py"><code>policy.py</code></a>, <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/plugins/agent-efficiency/src/agent_efficiency/capability_retrieval.py"><code>capability_retrieval.py</code></a>, and <code>bundled/</code></td></tr>
+<tr><td>Counting and persistent state</td><td><a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/plugins/agent-efficiency/src/agent_efficiency/store.py"><code>store.py</code></a></td></tr>
+<tr><td>Checks and receipt freshness</td><td><a href="https://github.com/agent-efficiency/agent-efficiency/tree/v0.2.2/plugins/agent-efficiency/src/agent_efficiency/verification"><code>verification/</code></a></td></tr>
+<tr><td>Note selection and delivery</td><td><a href="https://github.com/agent-efficiency/agent-efficiency/tree/v0.2.2/plugins/agent-efficiency/src/agent_efficiency/vault"><code>vault/</code></a> and <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/plugins/agent-efficiency/src/agent_efficiency/vault_delivery.py"><code>vault_delivery.py</code></a></td></tr>
+<tr><td>Reporting and comparisons</td><td><a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/plugins/agent-efficiency/src/agent_efficiency/report.py"><code>report.py</code></a> and <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/plugins/agent-efficiency/src/agent_efficiency/experiments.py"><code>experiments.py</code></a></td></tr>
+</tbody>
+</table></div>
+</section>
+<footer><p>Prepared from the released source on 7 November 2026. Diagrams simplify the execution flow; linked source files define the exact behavior. This document loads no external resources. Network access is needed only when you follow a source link.</p></footer>
+</article></main>
+</div>
+<script>
+document.documentElement.classList.add("has-js");
+document.getElementById("print-document").addEventListener("click", function () {
+  window.print();
+});
+var traceDescriptions = [
+  ["Event 1: one new invocation.", "Invocation A starts. Total calls becomes 1. Its outcome is still pending, so resolved calls and failures remain 0."],
+  ["Event 2: one failed result.", "Invocation A fails. The result is resolved once. Total calls stays at 1; resolved calls and failures become 1."],
+  ["Event 3: a duplicate report.", "The batch result describes invocation A again. Calls, resolved calls, and failures all stay at 1. A repeated host report is not a second attempt."],
+  ["Event 4: a real second invocation.", "Invocation B starts, even though it repeats the same action. Total calls becomes 2. B has no result yet, so resolved calls and failures remain 1."],
+  ["Event 5: a second failed attempt.", "Invocation B fails. There are now 2 calls, 2 resolved results, and 2 failures. Repeated-failure guidance can now consider two actual failures, subject to mode and guidance limits."]
+];
+var traceButtons = Array.from(document.querySelectorAll("[data-trace]"));
+traceButtons.forEach(function (button) {
+  button.disabled = false;
+  button.addEventListener("click", function () {
+    var selected = Number(button.dataset.trace);
+    traceButtons.forEach(function (item) {
+      var active = item === button;
+      item.setAttribute("aria-pressed", String(active));
+      item.closest("tr").dataset.active = String(active);
+    });
+    var paragraph = document.createElement("p");
+    var title = document.createElement("strong");
+    title.textContent = traceDescriptions[selected][0];
+    paragraph.append(title, document.createTextNode(" " + traceDescriptions[selected][1]));
+    document.getElementById("trace-description").replaceChildren(paragraph);
+  });
+});
+var contentsLinks = Array.from(document.querySelectorAll(".contents a"));
+if ("IntersectionObserver" in window) {
+  var visibleSections = new Set();
+  var sectionObserver = new IntersectionObserver(function (entries) {
+    entries.forEach(function (entry) {
+      if (entry.isIntersecting) visibleSections.add(entry.target.id);
+      else visibleSections.delete(entry.target.id);
+    });
+    var active = contentsLinks.find(function (link) {
+      return visibleSections.has(link.hash.slice(1));
+    });
+    if (active) contentsLinks.forEach(function (link) {
+      if (link === active) link.setAttribute("aria-current", "location");
+      else link.removeAttribute("aria-current");
+    });
+  }, { rootMargin: "-5% 0px -55% 0px" });
+  document.querySelectorAll("article section").forEach(function (section) {
+    sectionObserver.observe(section);
+  });
+}
+var previouslyClosed = [];
+window.addEventListener("beforeprint", function () {
+  previouslyClosed = Array.from(document.querySelectorAll("details:not([open])"));
+  previouslyClosed.forEach(function (detail) { detail.open = true; });
+});
+window.addEventListener("afterprint", function () {
+  previouslyClosed.forEach(function (detail) { detail.open = false; });
+  previouslyClosed = [];
+});
+</script>
+</body>
+</html>

@@ -4,6 +4,9 @@ This page helps you see how the parts of Agent Efficiency fit together before
 you change or extend them. It is one local runtime with thin adapters for
 Claude Code, Cursor, and Codex.
 
+For a standalone illustrated guide, open [How Agent Efficiency works](how-it-works.html).
+It includes inline diagrams, an event-counting example, and a print layout.
+
 ```mermaid
 flowchart LR
     subgraph hosts["Agent hosts"]
