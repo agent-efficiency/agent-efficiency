@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="An illustrated guide to Agent Efficiency 0.2.2: events, guidance, verification, vault context, privacy, and measurement.">
+<meta name="description" content="Meet Agent Efficiency: local guidance, project knowledge, and verification for coding agents. Explore product features and the illustrated technical guide.">
 <meta name="color-scheme" content="light">
-<title>How Agent Efficiency works</title>
+<title>Agent Efficiency | Product and technical guide</title>
 <style>
 :root {
   --ink: oklch(0.25 0.025 270);
@@ -41,6 +41,83 @@ button:hover { background: var(--accent-soft); }
 .print-button { border: 1px solid var(--line); border-radius: 6px; padding: 8px 14px; color: var(--ink); background: var(--white); white-space: nowrap; }
 .js-only { display: none; }
 .has-js .js-only { display: inline-block; }
+[hidden] { display: none !important; }
+.document-tabs { max-width: 1240px; margin: auto; padding: 0 32px; display: flex; gap: 28px; }
+.document-tabs a { color: var(--muted); padding: 14px 0 12px; text-decoration: none; border-bottom: 3px solid transparent; font-weight: 650; }
+.document-tabs a:hover, .document-tabs a[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+.doc-panel { outline-offset: -3px; }
+.product-article { max-width: 1240px; margin: auto; padding: 52px 32px 56px; }
+.product-hero { display: grid; grid-template-columns: 1.1fr 1fr; gap: 56px; align-items: center; }
+.product-hero h1 { font-size: clamp(2.3rem, 4.2vw, 3.6rem); max-width: 19ch; }
+.product-hero .lead { max-width: 49ch; }
+.product-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 16px 24px; margin: 26px 0 0; }
+.primary-link { display: inline-block; background: var(--accent); color: var(--white); border-radius: 6px; padding: 11px 18px; font-weight: 650; text-decoration: none; }
+.primary-link:hover { text-decoration: underline; }
+.product-map { margin: 0; padding: 26px; border-radius: 12px; background: var(--accent-soft); }
+.map-hosts { display: flex; flex-wrap: wrap; justify-content: center; gap: 9px; }
+.map-hosts span { padding: 7px 12px; background: var(--white); border: 1px solid var(--line); border-radius: 5px; font-size: 14px; font-weight: 650; }
+.map-arrow { display: block; text-align: center; color: var(--accent); font-size: 26px; line-height: 1.5; }
+.map-core { padding: 22px 16px; border-radius: 8px; background: var(--accent); color: var(--white); text-align: center; }
+.map-core strong { font-size: 23px; }
+.map-core p { font-size: 15px; margin: 7px 0 0; }
+.map-results { list-style: none; margin: 0; padding: 0; }
+.map-results li { padding: 10px 0; margin: 0; border-bottom: 1px solid var(--line); font-size: 15px; }
+.map-results li:last-child { border-bottom: 0; }
+.map-results strong { color: var(--accent); }
+.product-map figcaption { font-size: 13px; margin-top: 18px; }
+.product-section { margin-top: 76px; }
+.product-section > h2 { max-width: 28ch; }
+.feature-row { display: grid; grid-template-columns: 0.95fr 1.05fr; gap: 52px; padding: 34px 0; border-top: 1px solid var(--line); align-items: start; }
+.feature-row h3 { margin: 0 0 14px; font-size: 1.45rem; }
+.feature-row p:last-child { margin-bottom: 0; }
+.feature-value { color: var(--context); }
+.product-flow { margin: 0; padding: 0; list-style: none; }
+.product-flow li { display: grid; grid-template-columns: 30px 1fr; column-gap: 12px; margin: 0; padding: 0 0 22px; position: relative; }
+.product-flow li:not(:last-child)::after { content: ""; position: absolute; left: 14px; top: 30px; bottom: 0; width: 1px; background: var(--line); }
+.flow-step { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid var(--accent); border-radius: 50%; color: var(--accent); font-size: 14px; font-weight: 650; }
+.product-flow strong { display: block; }
+.product-flow p { font-size: 14px; color: var(--muted); margin: 4px 0 0; }
+.product-flow .flow-guidance { background: var(--accent); color: var(--white); }
+.product-example { margin: 0; }
+.receipt-controls { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+.receipt-controls button { color: var(--accent); background: var(--white); padding: 8px 10px; border: 1px solid var(--line); border-radius: 5px; font-size: 14px; }
+.receipt-controls button[aria-pressed="true"] { background: var(--accent); color: var(--white); border-color: var(--accent); }
+.receipt-controls button:disabled { cursor: default; }
+.receipt-output { border: 1px solid var(--context); background: var(--context-soft); padding: 22px; border-radius: 8px; min-height: 218px; }
+.receipt-output[data-state="stale"] { background: var(--caution-soft); border-color: var(--caution); }
+.receipt-heading { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 20px; }
+.receipt-heading strong { font-size: 19px; }
+.receipt-state { color: var(--context); font-size: 14px; font-weight: 700; }
+[data-state="stale"] .receipt-state { color: var(--caution); }
+.receipt-output p { margin-bottom: 8px; font-size: 15px; }
+.receipt-example-all { margin: 12px 0 0; font-size: 14px; }
+.has-js .receipt-example-all { display: none; }
+.notes-flow { margin: 0; }
+.notes-source, .notes-session { padding: 18px 22px; border: 1px solid var(--line); border-radius: 8px; }
+.notes-source strong, .notes-session strong { display: block; margin-bottom: 8px; }
+.notes-source ul { margin: 0; padding-left: 20px; font-size: 14px; }
+.notes-session { background: var(--context-soft); border-color: var(--context); }
+.notes-session p { margin: 0; font-size: 14px; }
+.notes-selection { margin: 8px 0; color: var(--context); font-size: 14px; text-align: center; }
+.product-measure { display: grid; grid-template-columns: 1fr 1fr; gap: 52px; padding: 32px; background: var(--accent-soft); border-radius: 10px; }
+.product-measure h2 { max-width: 22ch; }
+.product-measure h3 { margin-top: 0; }
+.measure-list { margin: 0; padding: 0; list-style: none; }
+.measure-list li { margin: 0; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.measure-list li:first-child { padding-top: 0; }
+.measure-list li:last-child { border-bottom: 0; padding-bottom: 0; }
+.measure-list strong { display: block; }
+.measure-list span { display: block; font-size: 14px; color: var(--muted); margin-top: 4px; }
+.product-facts { display: grid; grid-template-columns: 175px minmax(0, 1fr); column-gap: 32px; margin: 24px 0 0; }
+.product-facts dt, .product-facts dd { margin: 0; padding: 18px 0; border-top: 1px solid var(--line); }
+.product-facts dt { font-weight: 700; }
+.product-facts dd { max-width: 74ch; }
+.pilot-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; padding-left: 22px; margin: 28px 0; }
+.pilot-steps li { padding-left: 5px; }
+.pilot-steps li::marker { color: var(--accent); font-weight: 700; }
+.pilot-steps strong { display: block; margin-bottom: 8px; }
+.pilot-steps p { font-size: 15px; }
+.product-footnote { margin-top: 24px; }
 .layout { display: grid; grid-template-columns: 176px minmax(0, 1fr); gap: 56px; max-width: 1240px; margin: auto; padding: 48px 32px 64px; }
 .contents { align-self: start; position: sticky; top: 24px; }
 .contents h2 { margin: 0 0 10px; font-size: 15px; line-height: 1.4; }
@@ -117,10 +194,25 @@ details[open] summary { margin-bottom: 14px; }
 .source-map td:first-child { width: 34%; }
 footer { margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
 @media (max-width: 1000px) {
+  .product-hero { gap: 30px; }
+  .feature-row, .product-measure { gap: 30px; }
   .layout { grid-template-columns: 150px minmax(0, 1fr); gap: 30px; padding-inline: 24px; }
   .diagram-hint { display: block; }
 }
 @media (max-width: 760px) {
+  .document-tabs { padding-inline: 20px; }
+  .product-article { padding: 30px 20px 40px; }
+  .product-hero, .feature-row, .product-measure { grid-template-columns: 1fr; gap: 26px; }
+  .product-hero h1 { font-size: clamp(2.2rem, 8vw, 3.3rem); }
+  .product-section { margin-top: 48px; }
+  .product-map { padding: 22px 18px; }
+  .feature-row { padding: 28px 0; }
+  .product-measure { padding: 24px 20px; }
+  .product-facts { grid-template-columns: 1fr; }
+  .product-facts dt { padding-bottom: 6px; }
+  .product-facts dd { padding-top: 0; border-top: 0; }
+  .pilot-steps { grid-template-columns: 1fr; gap: 8px; }
+  .receipt-output { min-height: 0; padding: 18px; }
   .masthead-inner { padding: 16px 20px; }
   .identity { gap: 9px; }
   .identity .edition { display: none; }
@@ -146,9 +238,37 @@ footer { margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--line);
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 @media print {
   @page { size: A4; margin: 16mm; }
+  :focus, :focus-visible { outline: none !important; }
   html { scroll-behavior: auto; }
   body { font-size: 10pt; line-height: 1.5; }
-  .skip, .contents, .print-button, .diagram-hint, .trace-instruction { display: none !important; }
+  .skip, .contents, .print-button, .diagram-hint, .trace-instruction, .document-tabs, .receipt-controls { display: none !important; }
+  .product-article { padding: 20pt 0 0; }
+  .product-hero { grid-template-columns: 1.1fr 1fr; gap: 22pt; }
+  .product-hero h1 { font-size: 27pt; }
+  .product-map { padding: 14pt; }
+  .map-hosts span { padding: 4pt 6pt; font-size: 8pt; }
+  .map-core { padding: 14pt 8pt; }
+  .map-core strong { font-size: 15pt; }
+  .map-core p, .map-results li { font-size: 9pt; }
+  .map-arrow { font-size: 18pt; }
+  .product-map figcaption, .product-flow p { font-size: 8pt; }
+  .feature-row { grid-template-columns: 0.95fr 1.05fr; gap: 22pt; padding: 20pt 0; break-inside: avoid; }
+  .feature-row h3 { font-size: 15pt; }
+  .product-section { margin-top: 28pt; }
+  .product-measure { grid-template-columns: 1fr 1fr; gap: 20pt; padding: 18pt; break-inside: avoid; }
+  .product-measure h2 { font-size: 18pt; }
+  .receipt-output { min-height: 0; padding: 14pt; }
+  .receipt-output p, .notes-source ul, .notes-session p, .notes-selection, .measure-list span, .pilot-steps p { font-size: 9pt; }
+  .receipt-heading strong { font-size: 12pt; }
+  .receipt-state { font-size: 9pt; }
+  .has-js .receipt-example-all { display: block; font-size: 9pt; }
+  .product-facts { grid-template-columns: 115pt 1fr; gap: 0 20pt; }
+  .product-facts dt, .product-facts dd { padding: 12pt 0; border-top: 1px solid var(--line); }
+  .pilot-steps { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20pt; break-inside: avoid; }
+  .product-actions { margin-top: 16pt; }
+  .primary-link { color: var(--accent); background: transparent; border: 1px solid var(--accent); padding: 6pt 10pt; }
+  .product-hero, .product-map, .product-facts, .product-flow, #product-start { break-inside: avoid; }
+  .product-map, .map-core, .flow-guidance, .receipt-output, .notes-session, .product-measure { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   .masthead-inner { padding: 0 0 10pt; }
   .layout { display: block; padding: 20pt 0 0; max-width: none; }
   h1 { font-size: 30pt; max-width: none; }
@@ -183,9 +303,139 @@ footer { margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--line);
 <body>
 <a class="skip" href="#main">Skip to the document</a>
 <div class="masthead"><div class="masthead-inner">
-  <div class="identity"><span class="mark" aria-hidden="true">AE</span><span>Agent Efficiency</span><span class="edition">Technical guide</span></div>
-  <button type="button" class="print-button js-only" id="print-document">Print / Save PDF</button>
-</div></div>
+  <div class="identity"><span class="mark" aria-hidden="true">AE</span><span>Agent Efficiency</span><span class="edition">Product and technical guide</span></div>
+  <button type="button" class="print-button js-only" id="print-document" title="Print the selected tab">Print / Save PDF</button>
+</div>
+<nav class="document-tabs" aria-label="Guide views">
+  <a id="product-tab" href="#product">Product</a>
+  <a id="technical-tab" href="#technical-guide">How it works</a>
+</nav>
+</div>
+<main id="main">
+<div id="product" class="doc-panel">
+<article class="product-article">
+<header class="product-hero">
+  <div>
+    <div class="metadata"><span>Local coding-agent plugin</span><span>Open source · MIT</span></div>
+    <h1>Keep agent work focused. Make checks visible.</h1>
+    <p class="lead">Agent Efficiency helps developers and engineering teams get verifiable work from Claude Code, Codex, and Cursor. It spots repeated work, adds relevant project notes, and records checks against the code they tested.</p>
+    <p>Use it to see where a session gets stuck and whether a passing result still applies when you review the change.</p>
+    <div class="product-actions"><a class="primary-link" href="#product-features">Explore the features</a><a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/docs/install.md">Read the setup guide</a></div>
+  </div>
+  <figure class="product-map" aria-label="Product diagram: Agent Efficiency works with your coding tools to add guidance, context, and evidence">
+    <div class="map-hosts"><span>Claude Code</span><span>Codex</span><span>Cursor</span></div>
+    <span class="map-arrow" aria-hidden="true">↓</span>
+    <div class="map-core"><strong>Agent Efficiency</strong><p>Local rules, project knowledge, and checks</p></div>
+    <span class="map-arrow" aria-hidden="true">↓</span>
+    <ul class="map-results">
+      <li><strong>During the task:</strong> short guidance when work repeats.</li>
+      <li><strong>Across sessions:</strong> relevant notes from your project.</li>
+      <li><strong>At review:</strong> evidence of what passed and when.</li>
+    </ul>
+    <figcaption>Your coding agent does the work. You choose the checks and decide whether the result is acceptable.</figcaption>
+  </figure>
+</header>
+
+<section class="product-section" id="product-features" aria-labelledby="product-features-title">
+<h2 id="product-features-title">Practical help during the task</h2>
+<div class="feature-row">
+  <div>
+    <h3>Spot repeated work while it is happening</h3>
+    <p>Repeated failures, broad searches, and repeated installs can consume a session without resolving the task. Agent Efficiency recognizes these patterns and adds a short note that asks the agent to reconsider its next step.</p>
+    <p class="feature-value"><strong>Value for you:</strong> a way to flag unproductive activity without watching every tool call.</p>
+    <p class="small">Advice is capped at 3 notes per turn and 8 per session. You can observe silently or turn it off.</p>
+  </div>
+  <figure class="product-example">
+    <ol class="product-flow" aria-label="Example guidance sequence">
+      <li><span class="flow-step" aria-hidden="true">1</span><div><strong>A tool call fails</strong><p>The session records the result.</p></div></li>
+      <li><span class="flow-step" aria-hidden="true">2</span><div><strong>The same action fails again</strong><p>Repeated failures can trigger a rule.</p></div></li>
+      <li><span class="flow-step flow-guidance" aria-hidden="true">3</span><div><strong>A short note asks for a different approach</strong><p>The agent receives guidance before it continues.</p></div></li>
+    </ol>
+    <figcaption>Illustrative sequence. Rules consider the session mode and advice limits; the agent chooses its next action.</figcaption>
+  </figure>
+</div>
+<div class="feature-row">
+  <div>
+    <h3>Know which checks still apply</h3>
+    <p>A test result matters most when it matches the code you are reviewing. Run a configured check and Agent Efficiency saves a <strong>verification receipt</strong>: a record of the result and the code state it checked.</p>
+    <p>If the code changes, the earlier pass becomes stale. With project consent, guard mode can ask the agent once to run a required check before it finishes.</p>
+    <p class="feature-value"><strong>Value for you:</strong> a clear distinction between a current pass and a result from an earlier version of the work.</p>
+    <p><a href="#verification">See how verification works</a></p>
+  </div>
+  <figure class="product-example" id="product-receipt-example">
+    <div class="receipt-controls" role="group" aria-label="Explore the verification example">
+      <button type="button" data-receipt="0" aria-pressed="true" disabled>1. Check passes</button>
+      <button type="button" data-receipt="1" aria-pressed="false" disabled>2. Code changes</button>
+      <button type="button" data-receipt="2" aria-pressed="false" disabled>3. Check runs again</button>
+    </div>
+    <div class="receipt-output" data-state="current" aria-live="polite" aria-atomic="true">
+      <div class="receipt-heading"><strong>Unit tests</strong><span class="receipt-state">Current pass</span></div>
+      <p id="receipt-version"><strong>Checked:</strong> revision A</p>
+      <p id="receipt-explanation">The tests passed for the code you have now. The result is ready to inspect during review.</p>
+    </div>
+    <ol class="receipt-example-all"><li>Tests pass for revision A: current.</li><li>Code changes to revision B: the earlier pass is stale.</li><li>Tests pass again for revision B: current.</li></ol>
+    <figcaption>Illustrative example, not a live check or a product screenshot. A passing check covers what that check tests; acceptance still needs your review.</figcaption>
+  </figure>
+</div>
+<div class="feature-row">
+  <div>
+    <h3>Reuse project knowledge in new sessions</h3>
+    <p>Keep test instructions, project conventions, and lessons from earlier work in a <strong>vault</strong>, a Git repository of short notes. Agent Efficiency selects notes that match the working folder and adds them to the session.</p>
+    <p class="feature-value"><strong>Value for you:</strong> relevant project knowledge can follow the work across sessions, with less need to paste the same instructions again.</p>
+    <p class="small">You maintain the notes. Delivered context has a fixed allowance of 9,000 characters. A vault error does not block the session.</p>
+  </div>
+  <figure class="notes-flow" aria-label="Project notes are selected by scope and delivered into the agent session">
+    <div class="notes-source"><strong>Your note repository</strong><ul><li>Shared engineering conventions</li><li>How to test this project</li><li>Notes for other projects</li></ul></div>
+    <p class="notes-selection"><span aria-hidden="true">↓ </span>Select notes that match this working folder</p>
+    <div class="notes-session"><strong>Context for this session</strong><p>Relevant shared guidance and project notes, within a fixed size limit.</p></div>
+    <figcaption>Selected text enters the agent’s context. Agent Efficiency records delivery facts without storing note text in its database.</figcaption>
+  </figure>
+</div>
+</section>
+
+<section class="product-section product-measure" id="product-measure" aria-labelledby="product-measure-title">
+  <div>
+    <h2 id="product-measure-title">Find out whether it helps your team</h2>
+    <p>Activity reports show calls, failures, guidance, and verification state. The experiment ledger compares similar tasks with silent observation and active advice.</p>
+    <p>Judge the cost of reaching an accepted result, including failed attempts and review effort. Model cost is included when the host supplies it.</p>
+    <p><a href="#measurement">Read the measurement approach</a></p>
+  </div>
+  <div>
+    <h3>Make the decision with evidence</h3>
+    <ul class="measure-list">
+      <li><strong>Did the work meet your standard?</strong><span>Record acceptance and the evidence supporting it.</span></li>
+      <li><strong>Did repeated work or review effort change?</strong><span>Compare failures, actions, elapsed time, and human review.</span></li>
+      <li><strong>Was the advice worth its overhead?</strong><span>Rate the guidance and inspect the time and context it adds.</span></li>
+    </ul>
+    <p class="small product-footnote">Savings depend on your tasks and workflow. This release provides the tools to measure them; this guide makes no quantified savings claim.</p>
+  </div>
+</section>
+
+<section class="product-section" id="product-control" aria-labelledby="product-control-title">
+<h2 id="product-control-title">You control how much it does</h2>
+<dl class="product-facts">
+  <dt>Start quietly</dt><dd><strong>Observe</strong> records activity without adding advice. <strong>Advise</strong> adds short notes. <strong>Guard</strong> can request a missing required check with project consent. <strong>Off</strong> disables normal session recording and guidance.</dd>
+  <dt>Keep records local</dt><dd>The plugin stores activity counts, states, and check receipts on your machine. Its database excludes prompts, code, raw commands, and output. The monitoring process makes no model calls or network requests. Your agent and configured check commands retain their own behavior.</dd>
+  <dt>Use your chosen host</dt><dd>The plugin supports Claude Code, Codex, and Cursor. Setup and supported events differ by host. In version 0.2.2, Cursor uses a local plugin folder. <a href="#hosts">Compare host support.</a></dd>
+  <dt>Inspect and adapt</dt><dd>The code is available under the MIT License. You choose the project’s checks, maintain its notes, and can inspect the rules behind the advice.</dd>
+</dl>
+</section>
+
+<section class="product-section" id="product-start" aria-labelledby="product-start-title">
+<h2 id="product-start-title">Try it on one project</h2>
+<p>Start with a repository and task type your team knows well. Set a clear acceptance standard so you can judge whether to adopt the plugin.</p>
+<ol class="pilot-steps">
+  <li><strong>Install and observe</strong><p>Follow the host’s setup guide, confirm the plugin is active, and collect a baseline with observation mode.</p></li>
+  <li><strong>Add checks and useful notes</strong><p>Configure the tests that support your review. Add a small set of project notes. Enable advice on comparable tasks.</p></li>
+  <li><strong>Review the results</strong><p>Compare acceptance, repeated work, and review effort. Keep useful guidance and revise what distracts.</p></li>
+</ol>
+<div class="product-actions"><a class="primary-link" href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/docs/install.md">Set up Agent Efficiency</a><a href="#technical-guide">Explore the technical guide</a></div>
+<p class="small product-footnote">Requires Python 3.11 or later and a supported coding-agent host. This overview describes version 0.2.2. See the <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/README.md">release overview</a>, <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/docs/privacy.md">privacy details</a>, and <a href="https://github.com/agent-efficiency/agent-efficiency/blob/v0.2.2/LICENSE">license</a>.</p>
+</section>
+<footer><p>Product overview based on the released source. Use the How it works tab for diagrams, operating details, and source links. This file works offline; linked GitHub pages require a connection. Print / Save PDF prints the selected tab.</p></footer>
+</article>
+</div>
+<div id="technical-guide" class="doc-panel">
 <div class="layout">
 <nav class="contents" aria-label="Document contents">
   <h2>In this document</h2>
@@ -203,7 +453,7 @@ footer { margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--line);
   </ol>
   <p class="small">One file. No external libraries, fonts, or images are required. Source links open GitHub.</p>
 </nav>
-<main id="main"><article>
+<article>
 <header>
   <div class="metadata"><span>Version 0.2.2</span><span>Database schema 8</span><span>7 November 2026</span></div>
   <h1>How Agent Efficiency works</h1>
@@ -523,10 +773,92 @@ agent-efficiency evidence list</code></pre>
 </table></div>
 </section>
 <footer><p>Prepared from the released source on 7 November 2026. Diagrams simplify the execution flow; linked source files define the exact behavior. This document loads no external resources. Network access is needed only when you follow a source link.</p></footer>
-</article></main>
+</article>
 </div>
+</div>
+</main>
 <script>
 document.documentElement.classList.add("has-js");
+var tabs = Array.from(document.querySelectorAll(".document-tabs a"));
+var panels = Array.from(document.querySelectorAll(".doc-panel"));
+document.querySelector(".document-tabs").setAttribute("role", "tablist");
+tabs.forEach(function (tab) {
+  tab.setAttribute("role", "tab");
+  tab.setAttribute("aria-controls", tab.hash.slice(1));
+  var panel = document.getElementById(tab.hash.slice(1));
+  panel.setAttribute("role", "tabpanel");
+  panel.setAttribute("aria-labelledby", tab.id);
+  panel.tabIndex = 0;
+});
+function selectPanel(id) {
+  panels.forEach(function (panel) { panel.hidden = panel.id !== id; });
+  tabs.forEach(function (tab) {
+    var selected = tab.hash === "#" + id;
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+  });
+}
+function syncPanelWithHash() {
+  var target = document.getElementById(location.hash.slice(1));
+  var panel = target && target.closest(".doc-panel");
+  if (panel) {
+    var changedPanel = panel.hidden;
+    selectPanel(panel.id);
+    requestAnimationFrame(function () {
+      if (changedPanel) {
+        if (target !== panel) target.tabIndex = -1;
+        target.focus({ preventScroll: true });
+      }
+      if (target === panel) window.scrollTo({ top: 0, behavior: "instant" });
+      else target.scrollIntoView({ block: "start" });
+    });
+  } else if (!location.hash || !target) {
+    selectPanel("product");
+  }
+}
+tabs.forEach(function (tab, index) {
+  tab.addEventListener("click", function (event) {
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    selectPanel(tab.hash.slice(1));
+    if (location.hash !== tab.hash) history.pushState(null, "", tab.hash);
+    window.scrollTo({ top: 0, behavior: "instant" });
+  });
+  tab.addEventListener("keydown", function (event) {
+    var next;
+    if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
+    else if (event.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = tabs.length - 1;
+    else if (event.key === " ") { event.preventDefault(); tab.click(); return; }
+    else return;
+    event.preventDefault();
+    tabs[next].focus();
+    tabs[next].click();
+  });
+});
+selectPanel("product");
+syncPanelWithHash();
+window.addEventListener("hashchange", syncPanelWithHash);
+var receiptStates = [
+  { state: "current", label: "Current pass", version: "revision A", detail: "The tests passed for the code you have now. The result is ready to inspect during review." },
+  { state: "stale", label: "Earlier pass is stale", version: "revision A; current code is revision B", detail: "The code changed after the test. The earlier pass does not establish that revision B passes. Run the check again." },
+  { state: "current", label: "Current pass", version: "revision B", detail: "The tests passed again for the updated code. The new result matches revision B and is ready for review." }
+];
+var receiptButtons = Array.from(document.querySelectorAll("[data-receipt]"));
+receiptButtons.forEach(function (button) {
+  button.disabled = false;
+  button.addEventListener("click", function () {
+    var result = receiptStates[Number(button.dataset.receipt)];
+    receiptButtons.forEach(function (item) { item.setAttribute("aria-pressed", String(item === button)); });
+    document.querySelector(".receipt-output").dataset.state = result.state;
+    document.querySelector(".receipt-state").textContent = result.label;
+    var label = document.createElement("strong");
+    label.textContent = "Checked: ";
+    document.getElementById("receipt-version").replaceChildren(label, document.createTextNode(result.version));
+    document.getElementById("receipt-explanation").textContent = result.detail;
+  });
+});
 document.getElementById("print-document").addEventListener("click", function () {
   window.print();
 });

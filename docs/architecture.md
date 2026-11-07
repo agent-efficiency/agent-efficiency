@@ -5,7 +5,8 @@ you change or extend them. It is one local runtime with thin adapters for
 Claude Code, Cursor, and Codex.
 
 For a standalone illustrated guide, open [How Agent Efficiency works](how-it-works.html).
-It includes inline diagrams, an event-counting example, and a print layout.
+The Product tab introduces the features and customer value. The How it works
+tab includes inline diagrams, an event-counting example, and a print layout.
 
 ```mermaid
 flowchart LR
