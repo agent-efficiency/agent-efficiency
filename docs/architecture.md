@@ -7,6 +7,7 @@ Claude Code, Cursor, and Codex.
 For a standalone illustrated guide, open [How Agent Efficiency works](how-it-works.html).
 The Product tab introduces the features and customer value. The How it works
 tab includes inline diagrams, an event-counting example, and a print layout.
+The Improvement loop tab presents a proposed learning cycle for discussion.
 
 ```mermaid
 flowchart LR
