@@ -26,6 +26,7 @@ CHOICE = re.compile(
     PREFIX + r"\s+([0-9a-f]{16})\s+(once|similar|later|never)\s*", re.IGNORECASE
 )
 RESET = re.compile(PREFIX + r"\s+reset\s*", re.IGNORECASE)
+STATUS = re.compile(PREFIX + r"\s+status\s*", re.IGNORECASE)
 KEYS = {"kind", "target", "terms", "title", "reason", "source", "expires"}
 
 
@@ -192,6 +193,47 @@ def is_control(prompt: str) -> bool:
     return CONTROL_PREFIX.match(prompt) is not None
 
 
+def format_status(store: Store, cwd: Path, mode: str, session: str) -> str:
+    candidates = load_candidates(cwd)
+    project = project_identity(str(cwd))[0]
+    lines = [
+        "Current guidance proposals in this working directory.",
+        f"Session mode: {mode}.",
+    ]
+    if ledger.in_experiment(store, session):
+        lines.append("Guidance is disabled during this enrolled experiment.")
+    with store.connect() as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = 'guidance_state_v1'"
+        ).fetchone()
+        for item in candidates:
+            state = ledger.state(conn, project, item.action) if exists else {}
+            choice = state.get("choice")
+            if choice == "never":
+                label = "Rejected"
+            elif choice == "later":
+                label = "Deferred; not adopted"
+            elif choice == "similar":
+                label = (
+                    "Adopted"
+                    if state.get("version") == item.version
+                    else "Changed; needs a new choice"
+                )
+            else:
+                label = "Not adopted"
+            lines.append(
+                f"{label}: {item.target}. Matching words: {', '.join(item.terms)}."
+            )
+    if not candidates:
+        lines.append(
+            "No current proposals. Expired and removed proposals are not listed."
+        )
+    lines.append(
+        "No guidance was applied or choices changed. To clear saved choices, send agent-efficiency guidance reset."
+    )
+    return "\n".join(lines)
+
+
 def handle_control(
     store: Store, session: str, host: str, cwd: Path, prompt: str, mode: str
 ):
@@ -206,6 +248,8 @@ def handle_control(
         )
     project = project_identity(str(cwd))[0]
     request = ledger.digest(store.latest_turn_key(session) or "")
+    if STATUS.fullmatch(prompt):
+        return reply(format_status(store, cwd, mode, session))
     if RESET.fullmatch(prompt):
         with ledger.transaction(store) as conn:
             ledger.reset(conn, project, session, request)
@@ -216,7 +260,7 @@ def handle_control(
     choice = CHOICE.fullmatch(prompt)
     if not choice:
         return reply(
-            "Use an exact choice command from the suggestion, or agent-efficiency guidance reset."
+            "Use an exact choice command from the suggestion, agent-efficiency guidance status, or agent-efficiency guidance reset."
         )
     if mode not in {"advise", "guard"}:
         return reply(

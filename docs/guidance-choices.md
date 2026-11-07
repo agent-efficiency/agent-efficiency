@@ -103,7 +103,20 @@ rejection consume only the explicit control prompt. They do not start an agent
 task. The acceptance command asks the agent to continue the request that prompted
 the suggestion; whether it follows the tip still depends on the agent.
 
-To revoke future adoption and clear rejection choices for this directory, send:
+You can review current proposals and their saved choices with this user
+prompt control:
+
+```text
+agent-efficiency guidance status
+```
+
+It lists adopted, deferred, rejected, and unadopted proposals. Changed versions
+are marked as needing a new choice. It shows the session mode and whether an
+experiment disables guidance. It works while off, adds no guidance, and changes
+no choices. Expired and removed proposals are omitted. It does not report
+whether an agent followed a tip.
+
+To clear saved choices for this directory, send:
 
 ```text
 agent-efficiency guidance reset

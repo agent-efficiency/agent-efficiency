@@ -102,6 +102,37 @@ class GuidanceChoiceTests(unittest.TestCase):
         self.assertNotIn("src/auth", self.context(self.choose(token, "once")))
         self.assertNotIn("src/auth", self.context(self.prompt(turn="t2")))
 
+    def test_status_shows_adoption_and_changed_versions_without_applying(self):
+        token, _ = self.offer()
+        self.choose(token, "similar")
+        output = self.prompt("agent-efficiency guidance status")
+        self.assertIn("Adopted", output["stopReason"])
+        self.assertIn("src/auth", output["stopReason"])
+        self.assertEqual(self.context(output), "")
+        self.proposal["reason"] = "Updated note explanation."
+        self.write()
+        output = self.prompt("agent-efficiency guidance status")
+        self.assertIn("Changed; needs a new choice", output["stopReason"])
+
+    def test_status_does_not_create_guidance_tables_or_start_a_request(self):
+        output = self.prompt("agent-efficiency guidance status")
+        self.assertIn("Not adopted", output["stopReason"])
+        self.assertIsNone(self.store.latest_turn_key("s1"))
+        with self.store.connect() as conn:
+            self.assertIsNone(
+                conn.execute(
+                    "SELECT name FROM sqlite_master WHERE name = 'guidance_state_v1'"
+                ).fetchone()
+            )
+
+    def test_status_shows_rejection_while_off(self):
+        token, _ = self.offer()
+        self.choose(token, "never")
+        self.prompt("agent-efficiency off")
+        output = self.prompt("agent-efficiency guidance status")
+        self.assertIn("Rejected", output["stopReason"])
+        self.assertIn("Session mode: off", output["stopReason"])
+
     def test_choices_after_stop_cannot_restart_the_completed_request(self):
         token, _ = self.offer()
         self.store.finish_turn("s1", "t1")
