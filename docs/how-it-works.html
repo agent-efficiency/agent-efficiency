@@ -143,6 +143,20 @@ button:hover { background: var(--accent-soft); }
 .lesson-example { padding: 24px 28px; background: var(--context-soft); border-radius: 8px; }
 .lesson-example h3 { margin-top: 0; }
 .lesson-example .definition { grid-template-columns: 140px minmax(0, 1fr); margin-bottom: 0; }
+.guidance-proposal { padding: 26px 28px; border: 1px solid var(--accent); border-radius: 10px; max-width: 900px; }
+.proposal-origin { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; color: var(--accent); margin-bottom: 18px; }
+.proposal-origin strong { font-size: 17px; }
+.proposal-origin span { color: var(--muted); font-size: 14px; }
+.guidance-proposal h3 { margin: 0 0 18px; font-size: 1.4rem; }
+.guidance-proposal .definition { grid-template-columns: 145px minmax(0, 1fr); margin: 24px 0; }
+.guidance-proposal .definition dd { max-width: 64ch; }
+.proposal-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+.proposal-actions button { color: var(--accent); border: 1px solid var(--line); border-radius: 5px; background: var(--white); padding: 9px 13px; font-size: 14px; }
+.proposal-actions button[aria-pressed="true"] { color: var(--white); background: var(--accent); border-color: var(--accent); }
+.proposal-actions button:disabled { cursor: default; }
+.proposal-result { margin: 20px 0 0; padding: 16px 18px; background: var(--accent-soft); border-radius: 6px; font-size: 14px; }
+.proposal-result p { margin: 0; }
+.proposal-reset { margin-top: 12px; padding: 3px 0; border: 0; color: var(--accent); background: transparent; font-size: 14px; text-decoration: underline; text-underline-offset: 3px; }
 .design-table { min-width: 660px; }
 .design-table td:first-child { width: 23%; }
 .design-decisions { padding: 0; list-style: none; counter-reset: decision; }
@@ -247,6 +261,9 @@ footer { margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--line);
   .pilot-steps { grid-template-columns: 1fr; gap: 8px; }
   .receipt-output { min-height: 0; padding: 18px; }
   .loop-stage, .lesson-example { padding: 20px 18px; }
+  .guidance-proposal { padding: 22px 18px; }
+  .guidance-proposal .definition { grid-template-columns: 1fr; gap: 5px; }
+  .guidance-proposal .definition dd { margin-bottom: 14px; }
   .loop-stage .definition, .lesson-example .definition { grid-template-columns: 1fr; gap: 4px; }
   .loop-stage dd, .lesson-example dd { margin-bottom: 12px; }
   .design-navigation { gap: 8px 18px; }
@@ -315,6 +332,14 @@ footer { margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--line);
   .design-decisions li { break-inside: avoid; padding-block: 14pt; }
   .design-table { font-size: 8.5pt; }
   .design-formula { break-inside: avoid; padding: 12pt; }
+  .guidance-proposal { break-inside: avoid; padding: 16pt; }
+  .guidance-proposal h3 { font-size: 15pt; }
+  .guidance-proposal .definition { grid-template-columns: 100pt minmax(0, 1fr); gap: 8pt 14pt; margin: 14pt 0; }
+  .proposal-origin { margin-bottom: 12pt; }
+  .proposal-origin strong { font-size: 11pt; }
+  .proposal-origin span { font-size: 9pt; }
+  .proposal-actions button { color: var(--ink) !important; background: transparent !important; font-size: 9pt; padding: 5pt 7pt; }
+  .proposal-result, .proposal-reset { display: none !important; }
   .masthead-inner { padding: 0 0 10pt; }
   .layout { display: block; padding: 20pt 0 0; max-width: none; }
   h1 { font-size: 30pt; max-width: none; }
@@ -828,19 +853,19 @@ agent-efficiency evidence list</code></pre>
 <header class="design-intro">
   <div class="metadata"><span class="design-status">Design proposal · For discussion</span><span>Not implemented in 0.2.2</span></div>
   <h1>The improvement flywheel</h1>
-  <p class="lead">Use working notes to choose better next actions. Measure the result. Keep, revise, or retire guidance before it shapes another task.</p>
+  <p class="lead">Notice opportunities as the product is used. Surface a clear Agent Efficiency suggestion. Let the user choose whether to use it, then learn from the result.</p>
   <p>The aim is fewer total tokens to a verified, accepted result, with the requested scope, required checks, and quality of the work preserved.</p>
-  <nav class="design-navigation" aria-label="Improvement loop sections"><a href="#loop-flywheel">The flywheel</a><a href="#loop-example">A concrete example</a><a href="#loop-authority">What changes automatically</a><a href="#loop-measure">Proving value</a><a href="#loop-discussion">Decisions to discuss</a></nav>
+  <nav class="design-navigation" aria-label="Improvement loop sections"><a href="#loop-flywheel">The flywheel</a><a href="#loop-example">What the user sees</a><a href="#loop-authority">User choices</a><a href="#loop-measure">Proving value</a><a href="#loop-discussion">Decisions and open details</a></nav>
 </header>
 
 <section id="loop-flywheel" aria-labelledby="loop-flywheel-title">
 <h2 id="loop-flywheel-title">Each completed task can improve the next one</h2>
-<p>During work, select and deliver guidance. Between tasks, evaluate it and propose improvements.</p>
+<p>New guidance appears at a relevant moment during normal use. It identifies Agent Efficiency as the source, explains the proposed change, and waits for the user’s choice. Ignoring a suggestion leaves behavior unchanged.</p>
 <figure>
 <div class="diagram flywheel-frame" tabindex="0" role="region" aria-label="Six-stage improvement flywheel, scrollable on small screens">
 <svg viewBox="0 0 1000 610" role="img" aria-labelledby="flywheel-title flywheel-desc">
-<title id="flywheel-title">Retrieve, apply, verify, compare, revise, and retain</title>
-<desc id="flywheel-desc">A clockwise loop starts with relevant approved notes, delivers a small piece of guidance, verifies and records the work, compares matched outcomes, drafts a lesson, and keeps, revises, or retires it after review. The next task uses the resulting approved library. The objective is fewer total tokens per verified accepted result.</desc>
+<title id="flywheel-title">Notice, prepare, let the user choose, use and verify, evaluate, and refine</title>
+<desc id="flywheel-desc">A clockwise loop notices a possible improvement, prepares a specific suggestion, and presents it as coming from Agent Efficiency. The user chooses whether to use it. Accepted guidance is applied and the work verified. Results inform later suggestions, while the user retains control over new guidance. No response means no change.</desc>
 <defs><marker id="arrow-loop" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="var(--accent)"/></marker></defs>
 <path class="wire" d="M645 65 C745 65 815 100 815 145" marker-end="url(#arrow-loop)"/>
 <path class="wire" d="M815 255 V355" marker-end="url(#arrow-loop)"/>
@@ -848,88 +873,99 @@ agent-efficiency evidence list</code></pre>
 <path class="wire" d="M355 545 C255 545 185 510 185 465" marker-end="url(#arrow-loop)"/>
 <path class="wire" d="M185 355 V255" marker-end="url(#arrow-loop)"/>
 <path class="wire" d="M185 145 C185 95 255 65 355 65" marker-end="url(#arrow-loop)"/>
-<g class="loop-node" data-loop-node="0" data-selected="true"><rect x="365" y="20" width="270" height="90"/><text x="500" y="56" text-anchor="middle" class="node-title">1. Retrieve</text><text x="500" y="84" text-anchor="middle" class="loop-subtitle">Relevant approved notes</text></g>
-<g class="loop-node" data-loop-node="1"><rect x="680" y="155" width="270" height="90"/><text x="815" y="191" text-anchor="middle" class="node-title">2. Apply</text><text x="815" y="219" text-anchor="middle" class="loop-subtitle">One useful next action</text></g>
-<g class="loop-node" data-loop-node="2"><rect x="680" y="365" width="270" height="90"/><text x="815" y="401" text-anchor="middle" class="node-title">3. Verify</text><text x="815" y="429" text-anchor="middle" class="loop-subtitle">Checks and acceptance</text></g>
-<g class="loop-node" data-loop-node="3"><rect x="365" y="500" width="270" height="90"/><text x="500" y="536" text-anchor="middle" class="node-title">4. Compare</text><text x="500" y="564" text-anchor="middle" class="loop-subtitle">Benefit and full overhead</text></g>
-<g class="loop-node" data-loop-node="4"><rect x="50" y="365" width="270" height="90"/><text x="185" y="401" text-anchor="middle" class="node-title">5. Revise</text><text x="185" y="429" text-anchor="middle" class="loop-subtitle">A small, testable lesson</text></g>
-<g class="loop-node" data-loop-node="5"><rect x="50" y="155" width="270" height="90"/><text x="185" y="191" text-anchor="middle" class="node-title">6. Retain or retire</text><text x="185" y="219" text-anchor="middle" class="loop-subtitle">Review before wider use</text></g>
+<g class="loop-node" data-loop-node="0" data-selected="true"><rect x="365" y="20" width="270" height="90"/><text x="500" y="56" text-anchor="middle" class="node-title">1. Notice</text><text x="500" y="84" text-anchor="middle" class="loop-subtitle">A relevant opportunity</text></g>
+<g class="loop-node" data-loop-node="1"><rect x="680" y="155" width="270" height="90"/><text x="815" y="191" text-anchor="middle" class="node-title">2. Prepare</text><text x="815" y="219" text-anchor="middle" class="loop-subtitle">A specific, explained tip</text></g>
+<g class="loop-node" data-loop-node="2"><rect x="680" y="365" width="270" height="90"/><text x="815" y="401" text-anchor="middle" class="node-title">3. User chooses</text><text x="815" y="429" text-anchor="middle" class="loop-subtitle">Use once, adopt, or decline</text></g>
+<g class="loop-node" data-loop-node="3"><rect x="365" y="500" width="270" height="90"/><text x="500" y="536" text-anchor="middle" class="node-title">4. Use and verify</text><text x="500" y="564" text-anchor="middle" class="loop-subtitle">Apply the chosen guidance</text></g>
+<g class="loop-node" data-loop-node="4"><rect x="50" y="365" width="270" height="90"/><text x="185" y="401" text-anchor="middle" class="node-title">5. Evaluate</text><text x="185" y="429" text-anchor="middle" class="loop-subtitle">Results and full overhead</text></g>
+<g class="loop-node" data-loop-node="5"><rect x="50" y="155" width="270" height="90"/><text x="185" y="191" text-anchor="middle" class="node-title">6. Refine</text><text x="185" y="219" text-anchor="middle" class="loop-subtitle">Remember the user’s choice</text></g>
 <circle cx="500" cy="305" r="132" fill="var(--context-soft)"/>
-<text x="500" y="278" text-anchor="middle" class="loop-center">Fewer total tokens</text><text x="500" y="309" text-anchor="middle" class="loop-center">per accepted result</text><text x="500" y="348" text-anchor="middle">Required checks stay.</text>
+<text x="500" y="278" text-anchor="middle" class="loop-center">User decides</text><text x="500" y="309" text-anchor="middle" class="loop-center">what changes</text><text x="500" y="348" text-anchor="middle">Measure total task cost.</text>
 </svg>
 </div>
-<figcaption>Proposed behavior. The loop may also conclude that a note is unhelpful. In that case, future tasks receive less guidance. No outcome automatically becomes proof of savings.</figcaption>
+<figcaption>Proposed behavior. Declining a suggestion skips its use and records that choice. Previously adopted guidance can be reused within its agreed scope. New meaning or wider scope requires another explicit choice.</figcaption>
 </figure>
-<p><strong>Recommended starting point:</strong> one person, one repository, and one recurring task type. Automatically use approved guidance. Review new working rules before they become standing guidance.</p>
+<p><strong>Agreed direction:</strong> suggestions surface as the product is used, with enough context to decide. The user chooses which ones to use. A successful result can support a recommendation, but cannot activate new guidance automatically.</p>
 <p class="small loop-instruction">Select a stage to see its input, action, and evidence. All stages are included when you print.</p>
 <div class="loop-controls" role="group" aria-label="Explore the improvement loop">
-  <button type="button" data-loop-step="0" aria-pressed="true" aria-controls="loop-stage-0" disabled>1. Retrieve</button>
-  <button type="button" data-loop-step="1" aria-pressed="false" aria-controls="loop-stage-1" disabled>2. Apply</button>
-  <button type="button" data-loop-step="2" aria-pressed="false" aria-controls="loop-stage-2" disabled>3. Verify</button>
-  <button type="button" data-loop-step="3" aria-pressed="false" aria-controls="loop-stage-3" disabled>4. Compare</button>
-  <button type="button" data-loop-step="4" aria-pressed="false" aria-controls="loop-stage-4" disabled>5. Revise</button>
-  <button type="button" data-loop-step="5" aria-pressed="false" aria-controls="loop-stage-5" disabled>6. Retain or retire</button>
+  <button type="button" data-loop-step="0" aria-pressed="true" aria-controls="loop-stage-0" disabled>1. Notice</button>
+  <button type="button" data-loop-step="1" aria-pressed="false" aria-controls="loop-stage-1" disabled>2. Prepare</button>
+  <button type="button" data-loop-step="2" aria-pressed="false" aria-controls="loop-stage-2" disabled>3. User chooses</button>
+  <button type="button" data-loop-step="3" aria-pressed="false" aria-controls="loop-stage-3" disabled>4. Use and verify</button>
+  <button type="button" data-loop-step="4" aria-pressed="false" aria-controls="loop-stage-4" disabled>5. Evaluate</button>
+  <button type="button" data-loop-step="5" aria-pressed="false" aria-controls="loop-stage-5" disabled>6. Refine</button>
 </div>
 <div id="loop-stage-details" aria-live="polite" aria-atomic="true">
-  <div class="loop-stage" id="loop-stage-0"><h3>1. Retrieve the smallest useful set</h3><dl class="definition"><dt>Input</dt><dd>The current task, repository, and approved working notes.</dd><dt>Action</dt><dd>Filter by scope, task type, freshness, and explicit restrictions. Rank matching notes by relevance and prior evidence. A personal habit never overrides the current request or a project requirement.</dd><dt>Evidence</dt><dd>Record the selected guidance version and why it was eligible, using digests and fixed reason codes. Task text stays out of the measurement database.</dd></dl></div>
-  <div class="loop-stage" id="loop-stage-1"><h3>2. Apply one small piece of guidance</h3><dl class="definition"><dt>Input</dt><dd>A note with a clear condition and a suggested next action.</dd><dt>Action</dt><dd>For the first trial, deliver at most one optional learned note per task, capped at 500 characters within the existing vault allowance. Defer full bodies until needed. Avoid delivering the same note through two channels.</dd><dt>Evidence</dt><dd>Record only the guidance digest, delivery status, and character count. This identifies what the plugin supplied without storing its text. It does not prove the agent read or followed it.</dd></dl></div>
-  <div class="loop-stage" id="loop-stage-2"><h3>3. Verify the work and record acceptance</h3><dl class="definition"><dt>Input</dt><dd>The task result, configured check receipts, activity counts, and available host usage.</dd><dt>Action</dt><dd>Run the same required checks as usual. Record failures and abandoned work as well as passes. Ask for an acceptance judgment through the normal review process.</dd><dt>Evidence</dt><dd>Keep current check evidence separate from human acceptance. A useful rating or a passing test alone does not establish that the whole task was accepted.</dd></dl></div>
-  <div class="loop-stage" id="loop-stage-3"><h3>4. Compare similar tasks</h3><dl class="definition"><dt>Input</dt><dd>Results from tasks assigned before work to receive or withhold the optional note.</dd><dt>Action</dt><dd>Keep the host, model, task type, core guidance, and required checks comparable. Freeze the note version during the comparison. Include note loading, drafting, retries, and review effort.</dd><dt>Evidence</dt><dd>Report acceptance, tokens, cost, time, and defects separately. Missing usage stays unknown. A reduction in delivered context is not a measured reduction in task tokens.</dd></dl></div>
-  <div class="loop-stage" id="loop-stage-4"><h3>5. Draft a specific improvement</h3><dl class="definition"><dt>Input</dt><dd>A user correction, confirmed lesson, or repeated outcome pattern worth investigating.</dd><dt>Action</dt><dd>In an opted-in task-close review, the existing coding agent can draft a short candidate note with its scope, action, evidence, and expiry conditions. The local hooks do not call a model or infer new rules from counts alone.</dd><dt>Evidence</dt><dd>Keep the draft in the user-controlled note store, outside the telemetry database. Record the cost of drafting. The draft remains inactive until reviewed.</dd></dl></div>
-  <div class="loop-stage" id="loop-stage-5"><h3>6. Keep, narrow, or retire it</h3><dl class="definition"><dt>Input</dt><dd>The proposed note and its comparison results, including failures and uncertainty.</dd><dt>Action</dt><dd>Approve a bounded trial, retain useful guidance, narrow its scope, or retire it. An explicit rejection can mute an optional note immediately. A harmful result pauses its trial for review.</dd><dt>Evidence</dt><dd>Preserve previous versions and the reason for every change. A revision starts a new comparison; it does not rewrite an earlier result. Recheck active guidance when its project assumptions change.</dd></dl></div>
+  <div class="loop-stage" id="loop-stage-0"><h3>1. Notice a relevant opportunity</h3><dl class="definition"><dt>Input</dt><dd>The current task, saved project notes, explicit corrections, and observed activity.</dd><dt>Action</dt><dd>Look for a specific opportunity, such as repeated broad searches where a saved note names the relevant component. Check scope and freshness. Activity counts alone do not prove that the work was unnecessary.</dd><dt>Evidence</dt><dd>Keep the source of the suggestion clear: a saved note, an explicit correction, or a measured pattern. Store only digests and fixed reason codes in the measurement database.</dd></dl></div>
+  <div class="loop-stage" id="loop-stage-1"><h3>2. Prepare a clear suggestion</h3><dl class="definition"><dt>Input</dt><dd>A possible improvement and the facts supporting it.</dd><dt>Action</dt><dd>Prepare a short proposed action, its reason, scope, expected benefit, and limits. The existing agent may draft it within the enabled learning workflow; local hooks do not call a model. Deduplicate it against adopted and rejected guidance.</dd><dt>Evidence</dt><dd>Keep the candidate inactive in the user-controlled note store. Record drafting overhead. A hypothesis is labeled as a hypothesis, with no invented token-savings estimate.</dd></dl></div>
+  <div class="loop-stage" id="loop-stage-2"><h3>3. Surface it and let the user choose</h3><dl class="definition"><dt>Input</dt><dd>A relevant candidate with enough context for a decision.</dd><dt>Action</dt><dd>Show an “Agent Efficiency suggestion” in a visible host surface at a natural decision point. Offer use once, use for similar tasks, not now, and do not suggest again. No option is selected in advance. Silence means no change.</dd><dt>Evidence</dt><dd>Record the explicit choice separately from the fact that the proposal was supplied. A hidden context injection does not count as showing a suggestion to the user.</dd></dl></div>
+  <div class="loop-stage" id="loop-stage-3"><h3>4. Use only the chosen guidance and verify</h3><dl class="definition"><dt>Input</dt><dd>The user’s choice, its scope, and the unchanged task requirements.</dd><dt>Action</dt><dd>Use-once guidance expires with this task. Adopted guidance can be reused for matching tasks in the stated project. For the first slice, supply at most one learned tip per task, capped at 500 characters within the vault allowance. All required checks still apply.</dd><dt>Evidence</dt><dd>Record what guidance was supplied, available usage, current check receipts, and task acceptance. Choosing a tip does not establish that the agent followed it or that the task succeeded.</dd></dl></div>
+  <div class="loop-stage" id="loop-stage-4"><h3>5. Evaluate the result and its cost</h3><dl class="definition"><dt>Input</dt><dd>The choice, task outcome, feedback, and available host usage.</dd><dt>Action</dt><dd>Include proposal text, drafting, applied guidance, retries, and failed work. Report everyday usage as observation. Use a separate, explicitly enabled comparison to estimate whether a tip helps similar tasks.</dd><dt>Evidence</dt><dd>Keep user adoption, task acceptance, and measured effectiveness separate. Missing token totals stay unknown. Users choosing a tip on easier tasks cannot establish its savings.</dd></dl></div>
+  <div class="loop-stage" id="loop-stage-5"><h3>6. Refine suggestions and remember choices</h3><dl class="definition"><dt>Input</dt><dd>Outcomes and the user’s decisions about guidance.</dd><dt>Action</dt><dd>Reuse adopted guidance within scope, defer a not-now response, and suppress rejected suggestions. New wording that changes the action or scope returns as a new visible proposal. Good results never activate a new rule on their own.</dd><dt>Evidence</dt><dd>Retain versions, choices, and failed attempts. Do not evade a rejection with cosmetic wording changes. If adopted guidance becomes stale or harmful, stop using it and explain why.</dd></dl></div>
 </div>
 </section>
 
 <section id="loop-example" aria-labelledby="loop-example-title">
-<h2 id="loop-example-title">A lesson should change a specific action</h2>
-<p>Suppose an agent repeatedly searches an entire repository before finding the authentication code. A confirmed lesson from an earlier task could become the following optional guidance. This is an illustrative design example, not a measured result.</p>
-<div class="lesson-example">
-<h3>Start authentication investigations in the known component</h3>
-<dl class="definition">
-  <dt>When it applies</dt><dd>An authentication bug in this repository.</dd>
-  <dt>Suggested action</dt><dd>Start in <code>src/auth/</code>. Use the component’s focused tests while diagnosing the issue. Expand the search if those files do not explain the failure.</dd>
-  <dt>Requirements</dt><dd>Run all checks required for completion. The note changes the starting point, not the acceptance standard.</dd>
-  <dt>Why it exists</dt><dd>A user-confirmed lesson about where the relevant code lives. Source and review history stay with the note.</dd>
-  <dt>When to recheck</dt><dd>The component moves, the test setup changes, or the note sends the agent to the wrong place.</dd>
-  <dt>What to measure</dt><dd>Total task tokens, repeated searches, acceptance, and review effort, compared with similar tasks without this optional tip.</dd>
-</dl>
+<h2 id="loop-example-title">Make the source and proposed change clear</h2>
+<p>Every proposal is labeled <strong>Agent Efficiency suggestion</strong>. It says why it appeared, what would change, where it applies, and what is still uncertain. The user should be able to decide from that notice.</p>
+<p class="small">Illustrative interface. The observations below are examples, not live session data. Try each option to preview its meaning; these buttons do not change your settings.</p>
+<div class="guidance-proposal" role="region" aria-labelledby="proposal-heading">
+  <div class="proposal-origin"><strong>Agent Efficiency suggestion</strong><span>New suggestion · Not active</span></div>
+  <h3 id="proposal-heading">Start auth searches in the known component</h3>
+  <dl class="definition">
+    <dt>Why this appeared</dt><dd>This auth task has included two repository-wide searches. Your saved project note identifies <code>src/auth/</code> as the auth component.</dd>
+    <dt>Proposed change</dt><dd>Start the next search in <code>src/auth/</code>. Expand to other folders if that does not explain the issue.</dd>
+    <dt>Expected benefit</dt><dd>Less searching through unrelated files. Token savings have not been measured.</dd>
+    <dt>Scope</dt><dd>This task only, or future auth investigations in this project if you adopt it. All required checks still apply.</dd>
+  </dl>
+  <div class="proposal-actions" role="group" aria-label="Preview a decision on this Agent Efficiency suggestion">
+    <button type="button" data-guidance-choice="once" aria-pressed="false" disabled>Use once</button>
+    <button type="button" data-guidance-choice="adopt" aria-pressed="false" disabled>Use for similar tasks</button>
+    <button type="button" data-guidance-choice="later" aria-pressed="false" disabled>Not now</button>
+    <button type="button" data-guidance-choice="dismiss" aria-pressed="false" disabled>Don’t suggest again</button>
+  </div>
+  <div class="proposal-result" aria-live="polite" aria-atomic="true"><p id="proposal-result-text">No choice made. Existing behavior continues.</p></div>
+  <button type="button" class="proposal-reset js-only" id="reset-proposal">Reset example</button>
 </div>
-<p class="source-line">An explicit user instruction or required project rule applies in both comparison groups. Only optional suggestions can be withheld for an experiment.</p>
-<div class="loop-sequence" aria-label="Candidate note progresses to an approved trial, then active guidance or retirement">Candidate <span>→</span> Approved trial <span>→</span> Active or retired <span>→</span> Recheck when conditions change</div>
-<p>A note version contains a short action, scope, origin, review state, and expiry or invalidation conditions. Personal guidance stays private by default. Sharing a lesson with a team is a separate review decision.</p>
+<p class="source-line">The real host may use buttons or a clearly labeled message with explicit reply choices. Each integration must prove the user can see the source, explanation, and choices. A proposal must not become an agent instruction before the user accepts it.</p>
+<div class="loop-sequence" aria-label="Candidate becomes a visible suggestion, then a user choice, then scoped use or no change">Candidate <span>→</span> Visible suggestion <span>→</span> User choice <span>→</span> Scoped use or no change</div>
+<p>A note version includes its action, origin, scope, adoption state, and expiry conditions. Sharing personal guidance with a team or widening its scope requires a separate explicit choice.</p>
 </section>
 
 <section id="loop-authority" aria-labelledby="loop-authority-title">
-<h2 id="loop-authority-title">Automatic use, reviewed changes</h2>
-<p>Approve the allowed scope of learning once. Then let the system select existing guidance and collect evidence within that scope. Batch new-note reviews after tasks so the loop does not interrupt every tool call.</p>
-<div class="table-wrap" tabindex="0" role="region" aria-label="Proposed automation boundaries"><table class="design-table">
-<thead><tr><th scope="col">Operation</th><th scope="col">Recommended behavior</th><th scope="col">Boundary</th></tr></thead>
+<h2 id="loop-authority-title">The user decides what becomes guidance</h2>
+<p>Surface a useful proposal at the moment it can help, such as a pause after repeated unsuccessful work or the start of a matching task. Keep it separate from the agent’s own plan and from any error or required check.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Meaning of each guidance choice"><table class="design-table">
+<thead><tr><th scope="col">User choice</th><th scope="col">What happens now</th><th scope="col">What happens later</th></tr></thead>
 <tbody>
-<tr><td>Select and deliver</td><td>Automatic for approved notes that match the task.</td><td>Scope, freshness, and a fixed context limit apply. No suitable note means no added guidance.</td></tr>
-<tr><td>Rank and suppress</td><td>Use relevant evidence, deduplicate, and honor explicit mute feedback.</td><td>Freeze selection during a trial. Never suppress required instructions to make a metric look better.</td></tr>
-<tr><td>Draft a lesson</td><td>Allow the existing agent to propose a note during an opted-in task-close review.</td><td>Drafts are inactive. No background transcript collection and no extra model call in a lifecycle hook.</td></tr>
-<tr><td>Activate or rewrite</td><td>Review new behavior, changed meaning, and wider scope.</td><td>A direct request to save a specific rule can supply approval. Inferred preferences cannot.</td></tr>
-<tr><td>Stop harmful advice</td><td>Pause a trial after a serious verified regression; honor a user rejection immediately.</td><td>Preserve the failed attempt and the reason. Do not silently replace its result.</td></tr>
+<tr><td>Use once</td><td>Supply the proposed tip for the current task.</td><td>The permission expires with the task. A successful result does not turn it into a standing rule.</td></tr>
+<tr><td>Use for similar tasks</td><td>Apply the tip and save the stated task and project scope.</td><td>Reuse it within that scope without asking again. Changed meaning or wider scope requires a new choice.</td></tr>
+<tr><td>Not now</td><td>Continue existing behavior and defer the suggestion for this task.</td><td>It can reappear on a later relevant task after a cooldown. Deferral does not mean the guidance was ineffective.</td></tr>
+<tr><td>Don’t suggest again</td><td>Continue existing behavior and suppress this suggestion in the stated scope.</td><td>Do not resubmit the same action with cosmetic wording changes. The user can restore it from their guidance history.</td></tr>
+<tr><td>No response</td><td>Continue existing behavior. Do not block the task or apply the proposed change.</td><td>Leave it unadopted. Silence is neither permission nor a negative effectiveness rating.</td></tr>
 </tbody>
 </table></div>
-<p>The loop learns which approved guidance helps a class of work. It does not need a psychological profile of the person using it.</p>
+<p><strong>Proposed frequency limit:</strong> at most one new suggestion per task, with no repeat during that task after deferral or silence. Adoption stays reversible. If a previously adopted tip becomes stale or harmful, pause its use and show an Agent Efficiency notice explaining the reason.</p>
+<p>Learning can draft and rank suggestions automatically within the enabled scope. It cannot adopt them for the user. A suggestion’s source, the user’s choice, and its measured effect remain separate records.</p>
+<p>The system binds the user’s choice to the exact suggestion and scope shown. The agent cannot approve its own suggestion. An unclear reply leaves it pending until the user’s intent is clear.</p>
 </section>
 
 <section id="loop-components" aria-labelledby="loop-components-title">
-<h2 id="loop-components-title">Keep selection separate from learning</h2>
+<h2 id="loop-components-title">Separate a proposal from an instruction</h2>
 <figure>
 <div class="diagram" tabindex="0" role="region" aria-label="Proposed local architecture, horizontally scrollable on small screens">
 <svg viewBox="0 0 1000 385" role="img" aria-labelledby="loop-architecture-title loop-architecture-desc">
-<title id="loop-architecture-title">Local task selection and a separate review cycle</title>
-<desc id="loop-architecture-desc">Approved note files feed a local selector, which supplies bounded context to a coding agent. Task activity and verification produce metadata in an outcome ledger. An evaluator and a user-authorized review draft candidates in the note store. Review produces approved notes for later tasks. Note bodies and prompts do not enter the outcome ledger.</desc>
+<title id="loop-architecture-title">Visible user choice before new guidance reaches the agent</title>
+<desc id="loop-architecture-desc">A prepared suggestion goes to a visible Agent Efficiency notice. Only the user's accepted choice supplies new guidance to the agent. Work and verification produce metadata in an outcome ledger. Evaluation informs notes and future proposals. Previously adopted notes may be reused within the user's chosen scope. Raw notes and prompts stay out of the ledger.</desc>
 <defs><marker id="arrow-loop-architecture" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="var(--accent)"/></marker></defs>
-<text x="30" y="30" class="label">During the task: local and deterministic</text>
-<rect x="30" y="60" width="240" height="90" class="context-box"/><text x="150" y="96" text-anchor="middle" class="node-title">Approved note files</text><text x="150" y="124" text-anchor="middle">Text, scope, and versions</text>
-<rect x="380" y="60" width="240" height="90" class="accent-box"/><text x="500" y="96" text-anchor="middle" class="node-title">Task selector</text><text x="500" y="124" text-anchor="middle">Small context allowance</text>
+<text x="30" y="30" class="label">New guidance: the user chooses before it is applied</text>
+<rect x="30" y="60" width="240" height="90" class="context-box"/><text x="150" y="96" text-anchor="middle" class="node-title">Prepared suggestion</text><text x="150" y="124" text-anchor="middle">Action, reason, and scope</text>
+<rect x="380" y="60" width="240" height="90" class="accent-box"/><text x="500" y="96" text-anchor="middle" class="node-title">Agent Efficiency notice</text><text x="500" y="124" text-anchor="middle">Visible user choice</text>
 <rect x="730" y="60" width="240" height="90" class="box"/><text x="850" y="96" text-anchor="middle" class="node-title">Agent + required checks</text><text x="850" y="124" text-anchor="middle">Work, verify, review</text>
 <path d="M280 105 H370" class="wire" marker-end="url(#arrow-loop-architecture)"/><path d="M630 105 H720" class="wire" marker-end="url(#arrow-loop-architecture)"/>
-<text x="30" y="215" class="label">Between tasks: evaluation and approved changes</text>
-<rect x="30" y="255" width="240" height="90" class="caution-box"/><text x="150" y="291" text-anchor="middle" class="node-title">Candidate + review</text><text x="150" y="319" text-anchor="middle">New text stays in notes</text>
+<text x="675" y="90" text-anchor="middle" class="label">Accepted</text>
+<text x="30" y="215" class="label">Learning informs the next proposal; it never grants permission</text>
+<rect x="30" y="255" width="240" height="90" class="caution-box"/><text x="150" y="291" text-anchor="middle" class="node-title">Notes and choices</text><text x="150" y="319" text-anchor="middle">Versions and user intent</text>
 <rect x="380" y="255" width="240" height="90" class="accent-box"/><text x="500" y="291" text-anchor="middle" class="node-title">Evaluator</text><text x="500" y="319" text-anchor="middle">Matched task comparison</text>
 <rect x="730" y="255" width="240" height="90" class="box"/><text x="850" y="291" text-anchor="middle" class="node-title">Outcome ledger</text><text x="850" y="319" text-anchor="middle">Counts, digests, results</text>
 <path d="M850 160 V245" class="wire" marker-end="url(#arrow-loop-architecture)"/><text x="866" y="207" class="label">Metadata</text>
@@ -937,29 +973,30 @@ agent-efficiency evidence list</code></pre>
 <path d="M150 245 V225 H15 V45 H150 V50" class="wire" marker-end="url(#arrow-loop-architecture)"/>
 </svg>
 </div>
-<figcaption>Proposed components. Hooks use prepared notes and fixed selection rules. The existing agent may draft candidates during an authorized review, with that usage included in the accounting.</figcaption>
+<figcaption>Proposed components. Declining or ignoring the notice makes no change to the agent’s guidance. Adopted guidance can bypass the new-proposal path only within the user’s existing choice. Preparing, presenting, and applying a tip all count toward its overhead.</figcaption>
 </figure>
 <div class="two-columns">
-<div><h3>What stays in the note store</h3><p>Human-readable lessons, conditions, source references, review history, and old versions. These are inspectable files under the user’s control. Private notes are not shared automatically.</p></div>
-<div><h3>What reaches the ledger</h3><p>Guidance digests, condition assignments, delivery counts, context size, timing, available host usage, check evidence, and acceptance. No note text, note titles, paths, prompts, code, or raw output.</p></div>
+<div><h3>What stays in the note store</h3><p>Human-readable lessons, conditions, source references, adoption scope, and old versions. These are inspectable files under the user’s control. Private notes are not shared automatically.</p></div>
+<div><h3>What reaches the ledger</h3><p>Guidance digests, fixed choice codes, proposal and delivery counts, context size, timing, available host usage, check evidence, and task acceptance. No note text, note titles, paths, prompts, code, or raw output.</p></div>
 </div>
-<p>The existing formats cannot yet express every part of this design. Note scope and review metadata need a versioned note format. Note-level assignments and version-linked outcomes need an explicit ledger migration. Both must be designed before implementation. A test pass, an agent’s report that it used a note, and human acceptance remain separate facts.</p>
+<p>The existing formats cannot yet express every part of this design. Adoption scope needs a versioned note format. User choices and version-linked outcomes need an explicit ledger migration. Host adapters need a tested visible proposal-and-reply path. If a host cannot show the notice, keep the candidate pending; do not silently inject it as guidance.</p>
 </section>
 
 <section id="loop-measure" aria-labelledby="loop-measure-title">
 <h2 id="loop-measure-title">Prove that the loop pays for its context</h2>
-<p>Use the same normal guidance and required checks in both groups. Change only whether the optional candidate note is supplied. Comparing all of <code>observe</code> with all of <code>advise</code> would mix this effect with the rest of the product.</p>
+<p>During ordinary use, record choices and outcomes without claiming causation. People may accept suggestions on easier tasks or decline them for unrelated reasons. Adoption is a product decision, not evidence that a tip saves tokens.</p>
+<p>For a controlled comparison, get explicit agreement to test an optional tip on matched tasks. Use the same normal guidance and required checks in both groups. Change only whether that tip is supplied. Do not silently withhold adopted guidance to create a baseline. Comparing all of <code>observe</code> with all of <code>advise</code> would mix this effect with the rest of the product.</p>
 <p>For the first pilot, one task is one fresh enrolled session with a fixed brief, including its correction turns through acceptance or abandonment. Do not mix several unrelated tasks into that session.</p>
 <p class="design-formula">Total observed tokens for the comparison group, including failed work and learning overhead, divided by verified accepted tasks.</p>
 <ol>
   <li><strong>Assign before work.</strong> Use fresh sessions and matched tasks from a fixed task set. Keep host, model, effort, repository state, and task class comparable. Allocate the note before the first task turn.</li>
   <li><strong>Freeze the trial.</strong> Pin the note text and selection rules until the comparison ends. Do not use a task’s own outcome to improve its treatment halfway through the trial.</li>
-  <li><strong>Count the whole cost.</strong> Include guidance tokens, body reads, drafting and revision work, retries, and failed or abandoned attempts. Assign shared drafting overhead to the group that benefits from it.</li>
+  <li><strong>Count the whole cost.</strong> Include the visible proposal, guidance tokens, body reads, drafting and revision work, retries, and failed or abandoned attempts. Assign shared overhead to the relevant group, including suggestions that were not accepted.</li>
   <li><strong>Check quality first.</strong> Acceptance and required verification must hold. Review time and defects remain visible. Never reward skipping work the user asked for.</li>
   <li><strong>Keep uncertainty visible.</strong> If host token totals are missing, report context size and observed actions only. Useful feedback supports a hypothesis; it is not a token-savings measurement.</li>
 </ol>
-<div class="note"><p><strong>Proposed first pilot:</strong> 12 matched task pairs in one repository and host, with fresh sessions for each run. Use this as an initial comparison to decide whether to run a larger trial. Keep the version fixed, retain every outcome, and review the individual failures. The sample size and promotion threshold are discussion points, not established evidence.</p></div>
-<p>Active notes still need occasional comparison with a no-tip condition. Otherwise the loop may keep favoring an old note simply because it was delivered more often. Expired, rejected, and out-of-scope notes never return through this testing process.</p>
+<div class="note"><p><strong>Proposed first pilot:</strong> 12 matched task pairs in one repository and host, with fresh sessions for each run and explicit trial consent. Keep the version fixed, retain every outcome, and review the individual failures. The sample size and meaningful benefit threshold remain discussion points. No threshold activates guidance without the user’s choice.</p></div>
+<p>Optional comparisons can test whether older guidance remains useful. Expired, rejected, and out-of-scope notes never return through this process. Explicit user instructions and required project rules apply in both groups.</p>
 </section>
 
 <section id="loop-reference" aria-labelledby="loop-reference-title">
@@ -970,7 +1007,7 @@ agent-efficiency evidence list</code></pre>
 <tbody>
 <tr><td>Compact entries first</td><td>Select one short action for the current task. Open the full source only when needed.</td></tr>
 <tr><td>Useful, noisy, stale, or duplicate feedback</td><td>Use feedback to inform scope, suppression, and review. Keep user preference separate from measured effectiveness.</td></tr>
-<tr><td>Reviewable durable knowledge</td><td>Keep candidate notes inactive, retain version history, and review changes before wider use.</td></tr>
+<tr><td>Reviewable durable knowledge</td><td>Keep new suggestions inactive until the user chooses, retain version history, and ask again before changing meaning or scope.</td></tr>
 <tr><td>Separate decisions from writes</td><td>Make selection and evaluation deterministic functions. Keep file writes and optional agent drafting outside lifecycle decisions.</td></tr>
 </tbody>
 </table></div>
@@ -982,19 +1019,19 @@ agent-efficiency evidence list</code></pre>
 <section id="loop-first-slice" aria-labelledby="loop-first-slice-title">
 <h2 id="loop-first-slice-title">Build the first complete loop narrowly</h2>
 <ol class="pilot-steps">
-  <li><strong>Use existing knowledge</strong><p>Start with a small approved set of notes for one recurring task type. Add scope matching, one-tip delivery, deduplication, and an explanation of selection.</p></li>
-  <li><strong>Connect use to outcomes</strong><p>Extend the ledger for note-version trials. Capture acceptance and available token totals. Compare note-on and note-off tasks with the same normal checks.</p></li>
-  <li><strong>Close the review cycle</strong><p>Show the evidence and a proposed change. Approve, narrow, mute, or retire the note. Then start a new versioned trial. Add agent-drafted candidates after this manual path works.</p></li>
+  <li><strong>Surface one clear suggestion</strong><p>Use existing notes and observed activity for one recurring task type. Show the Agent Efficiency label, reason, proposed action, scope, and explicit choices.</p></li>
+  <li><strong>Honor the choice</strong><p>Implement use once, scoped adoption, deferral, and rejection. Confirm the selected effect. Verify that silence changes nothing and adopted guidance is not repeatedly re-approved.</p></li>
+  <li><strong>Learn from actual use</strong><p>Connect choices to task outcomes and available usage. Improve later proposals. Add opted-in comparisons for savings claims, and broaden candidate generation after this complete path works.</p></li>
 </ol>
 <p>The first useful deliverable should complete this cycle for one note. A larger memory store, team synchronization, new model service, and automatic rewriting of all guidance are outside that first slice.</p>
 </section>
 
 <section id="loop-discussion" aria-labelledby="loop-discussion-title">
-<h2 id="loop-discussion-title">Decisions for our discussion</h2>
+<h2 id="loop-discussion-title">Decisions made and details still open</h2>
 <ol class="design-decisions">
-  <li><div><h3>How much should change without review?</h3><p><strong>Recommended:</strong> select, rank, and mute within approved scope automatically; review new behavior and wider scope. The alternative is automatic activation of new notes after a pre-agreed evidence gate. That reduces review work but needs stronger controls for mistaken lessons.</p></div></li>
-  <li><div><h3>Where should the first lessons come from?</h3><p><strong>Recommended:</strong> existing notes and explicit corrections first. Add agent-proposed lessons from completed tasks after we can measure whether they help. This makes the first comparison easier to interpret.</p></div></li>
-  <li><div><h3>What is enough evidence to retain a note?</h3><p><strong>Recommended:</strong> require preserved acceptance and verification, then compare total tokens and review effort over matched tasks. Agree on the minimum sample and meaningful reduction before the pilot. Unknown token usage cannot support a savings claim.</p></div></li>
+  <li><div><h3>Settled: the user chooses new guidance</h3><p>Suggestions surface during use and are clearly attributed to Agent Efficiency. They explain what they are, why they appeared, and what accepting them would change. The user decides. No response leaves behavior unchanged.</p></div></li>
+  <li><div><h3>Detail to settle: timing and repetition</h3><p><strong>Proposed default:</strong> one new suggestion per task, at a relevant decision point. Defer until a later matching task after “Not now”; suppress after “Don’t suggest again.” The exact cooldown and each host’s visible presentation still need design.</p></div></li>
+  <li><div><h3>Detail to settle: evidence for recommendations</h3><p>Start with existing notes and explicit corrections. Preserve acceptance and verification, then compare total tokens and review effort in opted-in trials. Agree on sample size and a meaningful reduction before making savings claims. Evidence informs the user’s choice; it does not replace it.</p></div></li>
 </ol>
 </section>
 <footer><p>Design proposal prepared on 7 November 2026 for discussion. The Product and How it works tabs describe release 0.2.2. This tab proposes new behavior; it is not a claim that the loop has been implemented or has saved tokens.</p></footer>
@@ -1079,6 +1116,25 @@ loopButtons.forEach(function (button) {
   button.addEventListener("click", function () { selectLoopStage(Number(button.dataset.loopStep)); });
 });
 selectLoopStage(0);
+var proposalChoices = {
+  once: "Preview: use this tip for the current task only. It expires when the task ends.",
+  adopt: "Preview: use this tip now and for future auth investigations in this project. Save that scope so it does not need approval again unless the action or scope changes.",
+  later: "Preview: make no change and defer this suggestion for the rest of this task. It may appear on a later relevant task after a cooldown.",
+  dismiss: "Preview: make no change and stop suggesting this action for auth investigations in this project. The user can restore it from guidance history."
+};
+var proposalButtons = Array.from(document.querySelectorAll("[data-guidance-choice]"));
+var proposalResult = document.getElementById("proposal-result-text");
+proposalButtons.forEach(function (button) {
+  button.disabled = false;
+  button.addEventListener("click", function () {
+    proposalButtons.forEach(function (item) { item.setAttribute("aria-pressed", String(item === button)); });
+    proposalResult.textContent = proposalChoices[button.dataset.guidanceChoice];
+  });
+});
+document.getElementById("reset-proposal").addEventListener("click", function () {
+  proposalButtons.forEach(function (button) { button.setAttribute("aria-pressed", "false"); });
+  proposalResult.textContent = "No choice made. Existing behavior continues.";
+});
 var receiptStates = [
   { state: "current", label: "Current pass", version: "revision A", detail: "The tests passed for the code you have now. The result is ready to inspect during review." },
   { state: "stale", label: "Earlier pass is stale", version: "revision A; current code is revision B", detail: "The code changed after the test. The earlier pass does not establish that revision B passes. Run the check again." },
