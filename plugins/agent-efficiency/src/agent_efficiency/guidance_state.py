@@ -175,16 +175,27 @@ def choose(conn, offered, choice):
     )
 
 
-def reset(conn, project, session, request):
-    conn.execute("DELETE FROM guidance_state_v1 WHERE project = ?", (project,))
+def reset(conn, project, session, request, action=None):
+    clause = "project = ?"
+    parameters = (project,)
+    version = ZERO
+    if action is not None:
+        current = state(conn, project, action)
+        if not current:
+            return False
+        version = current["version"]
+        clause += " AND action = ?"
+        parameters = (project, action)
+    conn.execute(f"DELETE FROM guidance_state_v1 WHERE {clause}", parameters)
     # Pending tokens cannot revive an approval after a reset. Keep the offers
     # and receipts as history, and let the cooldown expire normally.
     conn.execute(
         "UPDATE guidance_offers_v1 SET choice = 'later' "
-        "WHERE project = ? AND choice IS NULL",
-        (project,),
+        f"WHERE {clause} AND choice IS NULL",
+        parameters,
     )
-    record(conn, project, session, request, ZERO, ZERO, "reset")
+    record(conn, project, session, request, action or ZERO, version, "reset")
+    return True
 
 
 def context_fits(conn, session, chars):

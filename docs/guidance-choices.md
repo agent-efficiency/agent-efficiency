@@ -116,6 +116,12 @@ experiment disables guidance. It works while off, adds no guidance, and changes
 no choices. Expired and removed proposals are omitted. It does not report
 whether an agent followed a tip.
 
+Each saved choice includes a `Clear this choice` command with its ID. Send that
+exact command to revoke adoption or clear a rejection for that search location.
+Other choices remain saved. This also works while off. The ID applies only in
+the current working directory. Reset keeps history and cooldowns, invalidates
+pending offers for that location, and does not remove earlier conversation text.
+
 To clear saved choices for this directory, send:
 
 ```text

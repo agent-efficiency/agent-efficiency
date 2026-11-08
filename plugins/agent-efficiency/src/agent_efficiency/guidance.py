@@ -25,7 +25,7 @@ CONTROL_PREFIX = re.compile(PREFIX + r"(?:\s|$)", re.IGNORECASE)
 CHOICE = re.compile(
     PREFIX + r"\s+([0-9a-f]{16})\s+(once|similar|later|never)\s*", re.IGNORECASE
 )
-RESET = re.compile(PREFIX + r"\s+reset\s*", re.IGNORECASE)
+RESET = re.compile(PREFIX + r"\s+reset(?:\s+([0-9a-f]{16}))?\s*", re.IGNORECASE)
 STATUS = re.compile(PREFIX + r"\s+status\s*", re.IGNORECASE)
 KEYS = {"kind", "target", "terms", "title", "reason", "source", "expires"}
 
@@ -224,6 +224,10 @@ def format_status(store: Store, cwd: Path, mode: str, session: str) -> str:
             lines.append(
                 f"{label}: {item.target}. Matching words: {', '.join(item.terms)}."
             )
+            if state:
+                lines.append(
+                    f"Clear this choice: agent-efficiency guidance reset {item.action}"
+                )
     if not candidates:
         lines.append(
             "No current proposals. Expired and removed proposals are not listed."
@@ -250,9 +254,20 @@ def handle_control(
     request = ledger.digest(store.latest_turn_key(session) or "")
     if STATUS.fullmatch(prompt):
         return reply(format_status(store, cwd, mode, session))
-    if RESET.fullmatch(prompt):
+    reset_match = RESET.fullmatch(prompt)
+    if reset_match:
+        action = reset_match[1].lower() if reset_match[1] else None
         with ledger.transaction(store) as conn:
-            ledger.reset(conn, project, session, request)
+            changed = ledger.reset(conn, project, session, request, action)
+        if not changed:
+            return reply(
+                "No saved choice matches that ID in this working directory. No choices changed."
+            )
+        if action:
+            return reply(
+                "One guidance choice was cleared. Other choices remain saved. "
+                "Earlier context may still be in this conversation. Start a new session to clear it."
+            )
         return reply(
             "Guidance choices for this working directory were reset. No future adoption remains. "
             "Earlier context may still be in this conversation. Start a new session to clear it."

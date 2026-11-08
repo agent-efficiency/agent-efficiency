@@ -102,6 +102,66 @@ class GuidanceChoiceTests(unittest.TestCase):
         self.assertNotIn("src/auth", self.context(self.choose(token, "once")))
         self.assertNotIn("src/auth", self.context(self.prompt(turn="t2")))
 
+    def test_reset_one_choice_preserves_other_adoptions(self):
+        from agent_efficiency.guidance import load_candidates
+
+        (self.project / "src/billing").mkdir()
+        self.write(
+            [
+                self.proposal,
+                {**self.proposal, "target": "src/billing", "terms": ["billing"]},
+            ]
+        )
+        token, _ = self.offer()
+        self.choose(token, "similar")
+        token, _ = self.offer(prompt="Find billing", turn="t2")
+        self.choose(token, "similar")
+        action = load_candidates(self.project)[0].action
+        status = self.prompt("agent-efficiency guidance status")
+        self.assertIn(f"guidance reset {action}", status["stopReason"])
+        self.prompt("agent-efficiency off")
+        result = self.prompt(f"agent-efficiency guidance reset {action}")
+        self.assertIn("One guidance choice", result["stopReason"])
+        self.prompt("agent-efficiency on")
+        self.assertNotIn("src/auth", self.context(self.prompt(turn="t3")))
+        self.assertIn("src/billing", self.context(self.prompt("Find billing", "t4")))
+
+    def test_unknown_reset_id_does_not_clear_adoption(self):
+        token, _ = self.offer()
+        self.choose(token, "similar")
+        output = self.prompt("agent-efficiency guidance reset 0000000000000000")
+        self.assertIn("No saved choice", output["stopReason"])
+        self.assertIn("src/auth", self.context(self.prompt(turn="t2")))
+
+    def test_reset_one_retains_history_and_used_token_cannot_restore_it(self):
+        from agent_efficiency.guidance import load_candidates
+
+        token, _ = self.offer()
+        action = load_candidates(self.project)[0].action
+        self.choose(token, "similar")
+        self.prompt(f"agent-efficiency guidance reset {action}")
+        self.assertNotIn("src/auth", self.context(self.choose(token, "similar")))
+        with self.store.connect() as conn:
+            rows = conn.execute(
+                "SELECT code, action FROM guidance_events_v1 WHERE code IN ('similar', 'reset')"
+            ).fetchall()
+        self.assertEqual([row[0] for row in rows], ["similar", "reset"])
+        self.assertEqual(rows[-1][1], action)
+
+    def test_reset_id_is_scoped_to_current_directory(self):
+        from agent_efficiency.guidance import load_candidates
+
+        token, _ = self.offer()
+        self.choose(token, "similar")
+        action = load_candidates(self.project)[0].action
+        other = self.root / "other"
+        other.mkdir()
+        output = self.prompt(
+            f"agent-efficiency guidance reset {action}", session="other", cwd=str(other)
+        )
+        self.assertIn("No saved choice", output["stopReason"])
+        self.assertIn("src/auth", self.context(self.prompt(turn="t2")))
+
     def test_status_shows_adoption_and_changed_versions_without_applying(self):
         token, _ = self.offer()
         self.choose(token, "similar")
