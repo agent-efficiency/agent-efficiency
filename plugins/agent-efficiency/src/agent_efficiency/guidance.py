@@ -83,6 +83,13 @@ def load_candidates(cwd: Path, *, today: date | None = None) -> tuple[Candidate,
     if len(raw) > MAX_FILE_BYTES:
         raise ValueError("guidance file exceeds 32768 bytes")
     data = json.loads(raw)
+    return validate_candidates(data, cwd, today=today)
+
+
+def validate_candidates(
+    data: Any, cwd: Path, *, today: date | None = None
+) -> tuple[Candidate, ...]:
+    """Validate an in-memory proposal document without writing it."""
     if (
         not isinstance(data, dict)
         or set(data) != {"schema", "suggestions"}

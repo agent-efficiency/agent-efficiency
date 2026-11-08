@@ -37,6 +37,32 @@ follow-up prompts.
 
 ## Prepare a suggestion
 
+You can generate the proposal JSON from explicit search locations in a Markdown
+note. For example:
+
+```markdown
+## Search locations
+- auth: src/auth
+```
+
+Run this from the unreleased checkout or its installed CLI:
+
+```sh
+agent-efficiency guidance draft --note project.md --cwd /path/to/project --expires 2026-12-08
+```
+
+The command prints JSON for review. It writes no files, changes no choices, and
+does not open the runtime database. Each entry must have exactly one lowercase
+matching word and one relative directory. Ambiguous entries, duplicate locations,
+missing directories, and past expiry dates are refused. The note is limited to
+32,768 bytes. The source label includes the note filename and a content digest,
+so regenerating from a changed note requires a new user choice.
+
+Review the printed proposal before saving it as `agent-efficiency-guidance.json`.
+Preserve any existing proposals when doing so. Drafting does not accept a proposal.
+This is an explicit preparation command, not background learning. Free-form
+inference, automatic drafting during sessions, and outcome evaluation remain open.
+
 Create `agent-efficiency-guidance.json` in the working directory where the host
 starts. The file is optional. Existing vault notes remain unchanged. A user or
 agent can prepare this file from a saved note, but preparing it never accepts it.

@@ -108,6 +108,16 @@ def build_parser() -> argparse.ArgumentParser:
     guidance_validate.add_argument(
         "--cwd", default=".", help="Working directory containing the proposal file."
     )
+    guidance_draft = guidance_commands.add_parser(
+        "draft", help="Print inactive proposals from explicit search-location notes."
+    )
+    guidance_draft.add_argument("--note", required=True, help="Markdown note to read.")
+    guidance_draft.add_argument(
+        "--cwd", default=".", help="Project directory used to check search locations."
+    )
+    guidance_draft.add_argument(
+        "--expires", required=True, help="Proposal expiry date, YYYY-MM-DD."
+    )
 
     for mode_command in ("on", "off", "observe", "advise", "guard"):
         mode_parser = subparsers.add_parser(
@@ -330,6 +340,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         from agent_efficiency.guidance import FILE_NAME, load_candidates
 
         cwd = Path(args.cwd).resolve()
+        if args.guidance_command == "draft":
+            from agent_efficiency.guidance_draft import draft
+
+            try:
+                document = draft(Path(args.note), cwd, args.expires)
+            except (OSError, ValueError, RuntimeError) as exc:
+                print(f"Cannot draft guidance: {exc}", file=sys.stderr)
+                return 1
+            print(json.dumps(document, indent=2))
+            return 0
         if not (cwd / FILE_NAME).is_file():
             print(f"No {FILE_NAME} in this working directory.", file=sys.stderr)
             return 1
