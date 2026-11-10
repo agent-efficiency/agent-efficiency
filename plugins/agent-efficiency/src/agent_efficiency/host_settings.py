@@ -89,7 +89,8 @@ def read_settings(path: Path, base: Path) -> tuple[dict[str, Any] | None, str | 
         return None, f"could not be read: it is larger than {MAX_SETTINGS_BYTES} bytes"
     try:
         document = json.loads(data.decode("utf-8"))
-    except ValueError:
+    except (ValueError, RecursionError):
+        # Deep nesting can exhaust the parser; that file is not read either.
         return None, "could not be read: it is not valid JSON"
     if not isinstance(document, dict):
         return None, "could not be read: it is not a JSON object"
@@ -252,10 +253,11 @@ def _folder_named(value: Any, home: Path) -> Path | None:
     """Return the absolute folder a setting names, or None when it is unclear.
 
     ``~`` and ``$HOME`` are read as the home folder. Any other variable, a
-    relative path, or a value that is not text cannot be resolved here.
+    relative path, a value that is not text, or a value that holds a NUL
+    character cannot be resolved here.
     """
 
-    if not isinstance(value, str) or not value.strip():
+    if not isinstance(value, str) or not value.strip() or "\0" in value:
         return None
     text = value.replace("${HOME}", str(home)).replace("$HOME", str(home))
     if "$" in text:
@@ -265,4 +267,8 @@ def _folder_named(value: Any, home: Path) -> Path | None:
     path = Path(text)
     if not path.is_absolute():
         return None
-    return path.resolve()
+    try:
+        return path.resolve()
+    except (OSError, ValueError, RuntimeError):
+        # A link loop raises RuntimeError on some Python versions.
+        return None

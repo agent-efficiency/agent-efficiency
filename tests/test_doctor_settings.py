@@ -4,6 +4,8 @@ import contextlib
 import io
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,7 +13,8 @@ from unittest import mock
 
 from agent_efficiency.cli import _digest_key_status, main
 from agent_efficiency.permission_report import coverage, interpret_rule
-from tests.test_doctor import isolated_home, write_json
+from agent_efficiency.paths import PLUGIN_ROOT
+from tests.test_doctor import isolated_environment, isolated_home, write_json
 
 VALID_TEXT = "0123456789abcdef" * 4 + "\n"
 
@@ -274,6 +277,73 @@ class DataFolderSettingsTests(DoctorCase):
         self.assertEqual(code, 1)
         self.assertIn(f"sets env.AGENT_EFFICIENCY_DATA to {self.other}", text)
         self.assertIn("    fix: change env.AGENT_EFFICIENCY_DATA", text)
+
+
+class HostileSettingsTests(DoctorCase):
+    """Settings content that doctor must survive and report as not read."""
+
+    def settings_text(self, text: str) -> Path:
+        path = self.project / ".claude" / "settings.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_deeply_nested_settings_are_reported_as_not_read(self) -> None:
+        path = self.settings_text("[" * 200_000 + "]" * 200_000)
+        code, doctor = self.doctor()
+        assert isinstance(doctor, dict)
+        self.assertEqual(code, 0)
+        self.assertIn(
+            {"file": str(path), "status": "could not be read: it is not valid JSON"},
+            doctor["data_dir_settings"]["problems"],
+        )
+        files = doctor["permission_settings"]["profiles"][0]["files"]
+        self.assertIn(
+            {"file": str(path), "status": "could not be read: it is not valid JSON"},
+            files,
+        )
+
+    def test_a_nul_in_a_data_folder_setting_is_not_checked(self) -> None:
+        values = (
+            {"env": {"AGENT_EFFICIENCY_DATA": "/tmp/a\u0000b"}},
+            {"statusLine": {"command": "agent-efficiency --data-dir /a\u0000b x"}},
+        )
+        for value in values:
+            with self.subTest(value=value):
+                path = self.project / ".claude" / "settings.json"
+                write_json(path, value)
+                code, doctor = self.doctor()
+                assert isinstance(doctor, dict)
+                report = doctor["data_dir_settings"]
+                self.assertEqual(code, 0)
+                self.assertEqual(report["findings"], [])
+                self.assertEqual(len(report["problems"]), 1)
+                self.assertEqual(report["problems"][0]["file"], str(path))
+                self.assertIn("not checked", report["problems"][0]["status"])
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "needs named pipes")
+    def test_a_named_pipe_as_the_trust_file_does_not_stall_doctor(self) -> None:
+        self.home.joinpath(".claude").mkdir()
+        os.mkfifo(self.home / ".claude.json")
+        environment = isolated_environment(self.home)
+        environment["PYTHONPATH"] = str(PLUGIN_ROOT / "src")
+        arguments = ["--data-dir", str(self.data), "doctor", "--json"]
+        try:
+            completed = subprocess.run(
+                [sys.executable, "-m", "agent_efficiency", *arguments]
+                + ["--cwd", str(self.project)],
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            self.fail("doctor did not return with a named pipe as the trust file")
+        self.assertEqual(completed.stderr, "")
+        doctor = json.loads(completed.stdout)
+        profile = doctor["permission_settings"]["profiles"][0]
+        self.assertFalse(profile["workspace_trusted"])
 
 
 class PermissionRuleTests(unittest.TestCase):

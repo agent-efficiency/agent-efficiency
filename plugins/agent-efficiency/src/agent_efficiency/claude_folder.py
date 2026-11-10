@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import sys
 from pathlib import Path
 from typing import Any, Mapping
@@ -45,6 +46,13 @@ MANAGED_DIRS = {
     "darwin": Path("/Library/Application Support/ClaudeCode"),
     "win32": Path("C:/Program Files/ClaudeCode"),
 }
+# The trust file grows with every project the host has opened, so it can be
+# large on a real machine.
+MAX_TRUST_FILE_BYTES = 64 * 1_048_576
+# Links are followed, as before. The open never waits on a named pipe.
+_TRUST_OPEN_FLAGS = (
+    os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+)
 NOT_CHECKED = (
     "managed settings delivered by a server or by device management are not "
     "checked here; they can also turn the plugin off"
@@ -224,9 +232,12 @@ def is_trusted(folder: Path, repository: Path | None, trust_file: Path) -> bool:
     the repository root inside git.
     """
 
+    data = _read_trust_file(trust_file)
+    if data is None:
+        return False
     try:
-        document = json.loads(trust_file.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        document = json.loads(data.decode("utf-8"))
+    except ValueError:
         return False
     projects = document.get("projects") if isinstance(document, dict) else None
     if not isinstance(projects, dict):
@@ -238,6 +249,36 @@ def is_trusted(folder: Path, repository: Path | None, trust_file: Path) -> bool:
         if candidate == repository:
             break
     return False
+
+
+def _read_trust_file(path: Path) -> bytes | None:
+    """Return the trust file's bytes, or None when trust cannot be known.
+
+    The open does not wait, so a named pipe cannot stall doctor. Only a
+    regular file of at most ``MAX_TRUST_FILE_BYTES`` is read.
+    """
+
+    try:
+        descriptor = os.open(path, _TRUST_OPEN_FLAGS)
+    except OSError:
+        return None
+    chunks: list[bytes] = []
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            return None
+        remaining = MAX_TRUST_FILE_BYTES + 1
+        while remaining > 0:
+            chunk = os.read(descriptor, min(remaining, 1_048_576))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+    except OSError:
+        return None
+    finally:
+        os.close(descriptor)
+    data = b"".join(chunks)
+    return None if len(data) > MAX_TRUST_FILE_BYTES else data
 
 
 def _applying_record(
