@@ -61,11 +61,12 @@ GUARD_CONFIG_MISSING = "config-missing"
 # placed in these messages.
 GUARD_CONFIG_MESSAGES = {
     GUARD_CONFIG_CHANGED: (
-        "agent-efficiency.toml changed during this session, so guard mode stays "
-        "on and the change is not in effect. Tell the user. To accept the "
-        "current file, the user types $agent-efficiency guard, or "
-        "$agent-efficiency advise if the file no longer sets guard. To undo "
-        "the change, restore the file."
+        "agent-efficiency.toml differs from the one this session pinned when it "
+        "entered guard mode, so guard mode stays on and the difference is not "
+        "in effect. Tell the user. This can also mean the working directory "
+        "moved to another project. To accept the current file, the user types "
+        "$agent-efficiency guard, or $agent-efficiency advise if the file no "
+        "longer sets guard. To undo a change, restore the file."
     ),
     GUARD_CONFIG_UNREADABLE: (
         "agent-efficiency.toml exists but is not a valid config, so guard mode "
@@ -73,9 +74,12 @@ GUARD_CONFIG_MESSAGES = {
         "it."
     ),
     GUARD_CONFIG_MISSING: (
-        "agent-efficiency.toml was removed during this session, so guard mode "
-        "stays on. Tell the user. To leave guard mode for this session, the "
-        "user types $agent-efficiency advise. To keep guard, restore the file."
+        "agent-efficiency.toml is not in the working directory, and it was "
+        "there when this session entered guard mode, so guard mode stays on. "
+        "Tell the user. If the working directory changed, guard checks apply "
+        "again once it is back in the project folder. If the file was removed, "
+        "restore it, or the user types $agent-efficiency advise to leave guard "
+        "mode for this session."
     ),
 }
 GUARD_CONFIG_FACTS = {
