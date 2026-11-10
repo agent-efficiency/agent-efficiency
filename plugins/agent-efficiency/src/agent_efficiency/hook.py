@@ -56,6 +56,32 @@ VAULT_CONFIG_NAME = "vault.json"
 GUARD_CONFIG_CHANGED = "config-changed"
 GUARD_CONFIG_UNREADABLE = "config-unreadable"
 GUARD_CONFIG_MISSING = "config-missing"
+# Fixed text only. Nothing from the repository or from a parse error is ever
+# placed in these messages.
+GUARD_CONFIG_MESSAGES = {
+    GUARD_CONFIG_CHANGED: (
+        "agent-efficiency.toml changed during this session, so guard mode stays "
+        "on and the change is not in effect. Tell the user. To accept the "
+        "current file, the user types $agent-efficiency guard, or "
+        "$agent-efficiency advise if the file no longer sets guard. To undo "
+        "the change, restore the file."
+    ),
+    GUARD_CONFIG_UNREADABLE: (
+        "agent-efficiency.toml exists but is not a valid config, so guard mode "
+        "is on until the file is fixed. Tell the user. Fix the file or restore "
+        "it."
+    ),
+    GUARD_CONFIG_MISSING: (
+        "agent-efficiency.toml was removed during this session, so guard mode "
+        "stays on. Tell the user. To leave guard mode for this session, the "
+        "user types $agent-efficiency advise. To keep guard, restore the file."
+    ),
+}
+GUARD_CONFIG_FACTS = {
+    GUARD_CONFIG_CHANGED: "project config changed",
+    GUARD_CONFIG_UNREADABLE: "project config unreadable",
+    GUARD_CONFIG_MISSING: "project config missing",
+}
 VAULT_REQUEST_MESSAGES = {
     "no_trees": (
         "No vault tree is registered. Run agent-efficiency vault register "
@@ -296,7 +322,16 @@ def _run_hook(
                     )
         return None
     if event == "Stop":
-        return _on_stop(payload, active_store, session_id, turn_key, host, mode)
+        return _on_stop(
+            payload,
+            active_store,
+            session_id,
+            turn_key,
+            host,
+            mode,
+            guard_state=guard_state,
+            guard_config=guard_config,
+        )
     if event == "SessionEnd":
         active_store.end_session(session_id)
         return None
@@ -1023,6 +1058,9 @@ def _on_stop(
     turn_key: str,
     host: str,
     mode: str,
+    *,
+    guard_state: str | None = None,
+    guard_config: ProjectConfig | None = None,
 ) -> dict[str, Any] | None:
     turn = store.get_turn(session_id, turn_key)
     store.record_intervention_outcome(session_id, turn_key, "turn_completed")
@@ -1036,7 +1074,9 @@ def _on_stop(
         return None
 
     if mode == "guard":
-        guard = _guard_stop_effect(payload, store, session_id, turn_key)
+        guard = _guard_stop_effect(
+            store, session_id, turn_key, state=guard_state, config=guard_config
+        )
         if guard:
             return render_intervention(store, session_id, turn_key, host, "Stop", guard)
         return None
@@ -1052,35 +1092,31 @@ def _on_stop(
 
 
 def _guard_stop_effect(
-    payload: dict[str, Any],
     store: Store,
     session_id: str,
     turn_key: str,
+    *,
+    state: str | None,
+    config: ProjectConfig | None,
 ) -> CanonicalEffect | None:
-    cwd = str(payload.get("cwd") or Path.cwd())
-    try:
-        config = load_project_config(cwd)
-    except ValueError:
+    if state is not None:
+        return _guard_config_effect(store, session_id, turn_key, state)
+    if config is None or config.mode != "guard":
         return None
-    if config.mode != "guard":
-        return None
-    session = store.get_session(session_id) or {}
-    if session.get("guard_policy_digest") != config.digest:
-        return None
-    state = workspace_state(config.root, config.digest)
+    workspace = workspace_state(config.root, config.digest)
     project_key, _ = project_identity(str(config.root))
     required = [
         check
         for check in config.checks
         if "code" in check.required_for
-        and _check_applies_to_paths(check, state.changed_paths)
+        and _check_applies_to_paths(check, workspace.changed_paths)
     ]
     for check in required:
         receipts = store.verification_receipts(project_key, check_id=check.check_id)
         status = receipt_state(
             receipts[0] if receipts else None,
             check_digest=check.digest,
-            workspace_digest=state.digest,
+            workspace_digest=workspace.digest,
             max_age_seconds=check.max_age_seconds,
         )
         if status == "current":
@@ -1105,6 +1141,27 @@ def _guard_stop_effect(
             measurement_label="guard-required-check",
         )
     return None
+
+
+def _guard_config_effect(
+    store: Store, session_id: str, turn_key: str, state: str
+) -> CanonicalEffect | None:
+    """Continue the turn once, so the agent tells the user about the config."""
+
+    policy_id = f"guard.{state}"
+    if not store.record_nudge(session_id, turn_key, policy_id):
+        return None
+    return CanonicalEffect(
+        effect="continue_turn",
+        policy_id=policy_id,
+        policy_revision="1",
+        observed_fact=GUARD_CONFIG_FACTS[state],
+        agent_message=GUARD_CONFIG_MESSAGES[state],
+        maximum_repeats=1,
+        required_capability="continue_turn",
+        fallback_effect="notify",
+        measurement_label="guard-config",
+    )
 
 
 def _check_applies_to_paths(check: Any, paths: tuple[str, ...] | None) -> bool:

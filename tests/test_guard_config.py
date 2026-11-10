@@ -175,3 +175,131 @@ class GuardSessionTests(GuardSessionCase):
         self.config.unlink()
         self.hook("PreToolUse", tool_name="Read", tool_input={"file_path": "a.py"})
         self.assertEqual(self.pin(), first)
+
+
+class GuardStopTests(GuardSessionCase):
+    """Stop after a code edit when the project config is no longer the pinned one."""
+
+    def edit_and_stop(self, turn: str = "turn-1") -> object:
+        (self.root / "app.py").write_text(f"value = {turn!r}\n")
+        self.hook(
+            "PostToolUse",
+            turn,
+            tool_name="Write",
+            tool_input={"file_path": str(self.root / "app.py")},
+            tool_response={"success": True},
+        )
+        return self.hook("Stop", turn, stop_hook_active=False)
+
+    def start(self) -> None:
+        self.prompt("Implement a substantial code change with tests.")
+
+    def policy_ids(self) -> list[str]:
+        with self.store.connect() as conn:
+            rows = conn.execute("SELECT policy_id FROM interventions").fetchall()
+        return [str(row["policy_id"]) for row in rows]
+
+    def assert_blocked(self, output: object, policy_id: str, phrase: str) -> None:
+        assert isinstance(output, dict)
+        self.assertEqual(output["decision"], "block")
+        self.assertIn(phrase, output["reason"])
+        self.assertNotIn(MARKER, repr(output))
+        self.assertIn(policy_id, self.policy_ids())
+
+    def test_changed_config_asks_once_per_turn(self) -> None:
+        self.start()
+        self.config.write_text(guard_config(timeout=60).replace("unit", MARKER))
+        output = self.edit_and_stop()
+        self.assert_blocked(output, "guard.config-changed", "changed during this")
+        self.assertIsNone(self.hook("Stop", stop_hook_active=False))
+
+    def test_config_changed_to_advise_still_asks(self) -> None:
+        self.start()
+        self.config.write_text(guard_config(mode="advise"))
+        output = self.edit_and_stop()
+        self.assert_blocked(output, "guard.config-changed", "$agent-efficiency advise")
+
+    def test_unreadable_config_asks(self) -> None:
+        self.start()
+        self.config.write_text(f'version = 1\nmode = "advise" {MARKER}\n')
+        output = self.edit_and_stop()
+        self.assert_blocked(output, "guard.config-unreadable", "not a valid config")
+
+    def test_unreadable_config_asks_in_a_session_that_never_pinned(self) -> None:
+        self.config.write_text(f"{MARKER} = [\n")
+        self.start()
+        self.assertIsNone(self.pin())
+        output = self.edit_and_stop()
+        self.assert_blocked(output, "guard.config-unreadable", "not a valid config")
+
+    def test_removed_config_asks(self) -> None:
+        self.start()
+        self.config.unlink()
+        output = self.edit_and_stop()
+        self.assert_blocked(output, "guard.config-missing", "was removed")
+
+    def test_a_turn_without_code_edits_is_not_asked(self) -> None:
+        self.start()
+        self.config.write_text(guard_config(timeout=60))
+        self.assertIsNone(self.hook("Stop", stop_hook_active=False))
+
+    def test_restoring_the_file_returns_to_the_required_check(self) -> None:
+        self.start()
+        original = self.config.read_text()
+        self.config.write_text(guard_config(timeout=60))
+        self.config.write_text(original)
+        output = self.edit_and_stop()
+        assert isinstance(output, dict)
+        self.assertIn("unit is missing", output["reason"])
+
+    def test_the_user_guard_control_accepts_the_changed_file(self) -> None:
+        self.start()
+        self.config.write_text(guard_config(timeout=60))
+        self.assert_blocked(
+            self.edit_and_stop(), "guard.config-changed", "changed during this"
+        )
+        self.prompt("$agent-efficiency guard", turn="turn-2")
+        self.assertEqual(self.pin(), load_project_config(self.root).digest)
+        output = self.edit_and_stop(turn="turn-2")
+        assert isinstance(output, dict)
+        self.assertIn("unit is missing", output["reason"])
+
+    def test_the_user_advise_control_accepts_a_file_that_left_guard(self) -> None:
+        self.start()
+        self.config.write_text(guard_config(mode="advise"))
+        self.prompt("$agent-efficiency advise", turn="turn-2")
+        self.assertIsNone(self.pin())
+        output = self.edit_and_stop(turn="turn-2")
+        self.assertNotIn("agent-efficiency.toml", repr(output))
+        self.assertNotIn("guard.config-changed", self.policy_ids())
+
+    def test_cursor_gets_one_followup_for_a_changed_config(self) -> None:
+        base = {
+            "conversation_id": "cursor-session",
+            "generation_id": "turn-1",
+            "cursor_version": "1.7.2",
+            "workspace_roots": [str(self.root)],
+        }
+        run_hook(
+            {
+                **base,
+                "hook_event_name": "beforeSubmitPrompt",
+                "prompt": "Implement a substantial code change with tests.",
+            },
+            store=self.store,
+        )
+        self.config.write_text(guard_config(timeout=60))
+        run_hook(
+            {
+                **base,
+                "hook_event_name": "afterFileEdit",
+                "file_path": str(self.root / "app.py"),
+                "edits": [],
+            },
+            store=self.store,
+        )
+        output = run_hook(
+            {**base, "hook_event_name": "stop", "loop_count": 0}, store=self.store
+        )
+        assert isinstance(output, dict)
+        self.assertIn("changed during this", output["followup_message"])
