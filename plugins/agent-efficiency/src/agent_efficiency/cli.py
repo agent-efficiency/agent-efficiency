@@ -1769,7 +1769,8 @@ def _format_doctor(result: dict[str, Any]) -> str:
         elif key == "data_dir_settings":
             lines.extend(_format_data_dir_settings(value))
         elif key == "digest_key":
-            lines.append(f"digest_key: {value['message']}")
+            folder = str(Path(value["path"]).parent)
+            lines.append(f"digest_key: {_shown_in(value['message'], folder)}")
         elif key == "permission_settings":
             lines.extend(_format_permission_settings(value))
         elif key == "unused_data_dirs":
@@ -1786,16 +1787,77 @@ def _format_doctor(result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+# Settings files and the environment are untrusted. In text output each value
+# from them is shown on one line, with control characters escaped, and cut to
+# this many characters. The JSON output keeps the values as they are.
+SHOWN_TEXT_LIMIT = 200
+_ESCAPES = {"\n": "\\n", "\r": "\\r", "\t": "\\t"}
+
+
+def _shown(value: Any, limit: int | None = SHOWN_TEXT_LIMIT) -> str:
+    """Return untrusted text as one visible line, cut to ``limit`` characters.
+
+    Each character that is not printable, such as a newline or an escape, is
+    shown as an escape like ``\\n`` or ``\\x1b``.
+    """
+
+    text = str(value)
+    pieces: list[str] = []
+    length = 0
+    for character in text:
+        if character == " " or character.isprintable():
+            piece = character
+        else:
+            piece = _ESCAPES.get(character) or _escape(character)
+        if limit is not None and length + len(piece) > limit:
+            return "".join(pieces) + f"... [cut: {len(text)} characters in all]"
+        pieces.append(piece)
+        length += len(piece)
+    return "".join(pieces)
+
+
+def _escape(character: str) -> str:
+    code = ord(character)
+    if code < 0x100:
+        return f"\\x{code:02x}"
+    if code < 0x10000:
+        return f"\\u{code:04x}"
+    return f"\\U{code:08x}"
+
+
+def _shown_in(text: str, *values: str) -> str:
+    """Show fixed text that holds untrusted values.
+
+    Each value is cut and escaped as ``_shown`` does. The fixed text is never
+    cut, and any control character left in the result is escaped.
+    """
+
+    for value in sorted({value for value in values if value}, key=len, reverse=True):
+        text = text.replace(value, _shown(value))
+    return _shown(text, limit=None)
+
+
+def _settings_paths(path: str) -> list[str]:
+    """Return a settings file path and the folders above it that text may name."""
+
+    file = Path(path)
+    return [path, str(file.parent), str(file.parent.parent)]
+
+
 def _format_data_dir_settings(value: dict[str, Any]) -> list[str]:
-    lines = [f"data_dir_settings: {value['summary']}"]
+    root = value["data_dir"]
+    lines = [f"data_dir_settings: {_shown_in(value['summary'], root)}"]
     for finding in value["findings"]:
         lines.append(
-            f"  split: {finding['file']} sets {finding['setting']} to "
-            f"{finding['folder']}"
+            f"  split: {_shown(finding['file'])} sets {_shown(finding['setting'])} "
+            f"to {_shown(finding['folder'])}"
         )
-        lines.append(f"    fix: {finding['fix']}")
+        fix = _shown_in(finding["fix"], *_settings_paths(finding["file"]), root)
+        lines.append(f"    fix: {fix}")
     lines.extend(
-        f"  {problem['file']}: {problem['status']}" for problem in value["problems"]
+        f"  {_shown(problem['file'])}: "
+        f"{_shown_in(problem['status'], *_settings_paths(problem['file']))}"
+        for problem in value["problems"]
     )
     lines.extend(
         f"  {HOST_NAMES.get(name, name)}: {text}"
@@ -1806,18 +1868,18 @@ def _format_data_dir_settings(value: dict[str, Any]) -> list[str]:
 
 def _format_permission_settings(value: dict[str, Any]) -> list[str]:
     lines = [
-        f"permission_settings in {value['folder']} (informational; doctor never "
-        "changes these files):"
+        f"permission_settings in {_shown(value['folder'])} (informational; doctor "
+        "never changes these files):"
     ]
     for profile in value["profiles"]:
         trust = "saved" if profile["workspace_trusted"] else "not saved"
         lines.append(
-            f"  Claude Code profile {profile['config_folder']} "
+            f"  Claude Code profile {_shown(profile['config_folder'])} "
             f"(workspace trust {trust}):"
         )
         for action, result in profile["actions"].items():
             rules = "; ".join(
-                f"{rule['list']} {rule['rule']} in {rule['file']}"
+                f"{rule['list']} {_shown(rule['rule'])} in {_shown(rule['file'])}"
                 + ("" if rule["covers"] == "all" else ", some forms only")
                 for rule in result["rules"]
             )
@@ -1825,15 +1887,17 @@ def _format_permission_settings(value: dict[str, Any]) -> list[str]:
                 f"    {action}: {result['decision']}" + (f" ({rules})" if rules else "")
             )
         lines.extend(
-            f"    not interpreted: {rule['list']} {rule['rule']} in {rule['file']}"
+            f"    not interpreted: {rule['list']} {_shown(rule['rule'])} in "
+            f"{_shown(rule['file'])}"
             for rule in profile["not_interpreted"]
         )
         lines.extend(
-            f"    defaultMode {mode['value']} in {mode['file']}"
+            f"    defaultMode {_shown(mode['value'])} in {_shown(mode['file'])}"
             for mode in profile["default_mode"]
         )
         lines.extend(
-            f"    {item['file']}: {item['status']}"
+            f"    {_shown(item['file'])}: "
+            f"{_shown_in(item['status'], *_settings_paths(item['file']))}"
             for item in profile["files"]
             if item["status"] != "read"
         )

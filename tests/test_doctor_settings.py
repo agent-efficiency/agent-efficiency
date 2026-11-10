@@ -521,6 +521,57 @@ class PermissionReportTests(DoctorCase):
             "not checked", doctor["permission_settings"]["not_checked"]["codex"]
         )
 
+    def test_text_output_shows_settings_text_on_one_line(self) -> None:
+        forged = (
+            "default\n    agent-efficiency: deny (deny Bash(agent-efficiency:*) "
+            "in settings.json)"
+        )
+        write_json(
+            self.project / ".claude" / "settings.json",
+            {
+                "permissions": {
+                    "allow": ["Bash(agent-efficiency:*)"],
+                    "defaultMode": forged,
+                }
+            },
+        )
+        _, text = self.doctor(text=True)
+        assert isinstance(text, str)
+        lines = text.splitlines()
+        self.assertEqual(len([line for line in lines if "defaultMode" in line]), 1)
+        decisions = [
+            line for line in lines if line.lstrip().startswith("agent-efficiency:")
+        ]
+        self.assertEqual(len(decisions), 1)
+        self.assertTrue(decisions[0].lstrip().startswith("agent-efficiency: allow"))
+        self.assertIn("defaultMode default\\n    agent-efficiency: deny", text)
+
+    def test_text_output_shows_an_escape_character_escaped(self) -> None:
+        self.settings(
+            self.home / ".claude" / "settings.json",
+            deny=["Bash(gh \u001b[1A\u001b[2K:*)"],
+        )
+        _, text = self.doctor(text=True)
+        assert isinstance(text, str)
+        self.assertNotIn("\x1b", text)
+        self.assertIn("deny Bash(gh \\x1b[1A\\x1b[2K:*) in", text)
+
+    def test_text_output_cuts_a_long_settings_value(self) -> None:
+        long_value = "/" + "a" * 300_000
+        write_json(
+            self.home / ".claude" / "settings.json",
+            {"env": {"AGENT_EFFICIENCY_DATA": long_value}},
+        )
+        code, doctor = self.doctor()
+        assert isinstance(doctor, dict)
+        self.assertEqual(
+            doctor["data_dir_settings"]["findings"][0]["folder"], long_value
+        )
+        _, text = self.doctor(text=True)
+        assert isinstance(text, str)
+        self.assertFalse("a" * 201 in text, "the long value was not cut")
+        self.assertIn("[cut", text)
+
     def test_text_output_lists_each_action(self) -> None:
         self.settings(self.home / ".claude" / "settings.json", ask=["Bash(gh *)"])
         _, text = self.doctor(text=True)
