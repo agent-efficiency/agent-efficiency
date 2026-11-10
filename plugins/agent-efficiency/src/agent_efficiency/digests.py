@@ -82,10 +82,14 @@ def read_key(root: str | Path) -> DigestKey:
         info = os.fstat(descriptor)
         if not stat.S_ISREG(info.st_mode):
             return DigestKey(FALLBACK_KEY, "file type")
-        if info.st_uid != os.geteuid():
-            return DigestKey(FALLBACK_KEY, "owner")
-        if info.st_mode & 0o077:
-            return DigestKey(FALLBACK_KEY, "mode")
+        # Where there is no effective user id, file owners and permission bits
+        # do not work this way, so those two checks are skipped.
+        geteuid = getattr(os, "geteuid", None)
+        if geteuid is not None:
+            if info.st_uid != geteuid():
+                return DigestKey(FALLBACK_KEY, "owner")
+            if info.st_mode & 0o077:
+                return DigestKey(FALLBACK_KEY, "mode")
         if info.st_size != KEY_SIZE:
             return DigestKey(FALLBACK_KEY, "size")
         data = os.read(descriptor, KEY_SIZE + 1)
@@ -105,16 +109,21 @@ def load_key(root: str | Path) -> bytes:
     is, and the fallback key is returned.
     """
 
-    folder = Path(root)
-    found = read_key(folder)
-    if found.state != MISSING:
-        return found.key
     try:
-        _create_key(folder)
-    except OSError:
-        # A folder that cannot hold the key still gets working digests.
-        pass
-    return read_key(folder).key
+        folder = Path(root)
+        found = read_key(folder)
+        if found.state != MISSING:
+            return found.key
+        try:
+            _create_key(folder)
+        except OSError:
+            # A folder that cannot hold the key still gets working digests.
+            pass
+        return read_key(folder).key
+    except Exception:
+        # Hooks must keep working, so any other failure also gives the
+        # fallback key.
+        return FALLBACK_KEY
 
 
 def _create_key(folder: Path) -> None:
@@ -147,6 +156,9 @@ def _create_key(folder: Path) -> None:
 
 
 def _write_exclusive(target: Path, data: bytes) -> None:
+    # This writes the key in place. On a file system without hard links, a
+    # reader can see a partial file for a moment. That reader then uses the
+    # built-in fallback key for that one hook.
     try:
         descriptor = os.open(
             target,
