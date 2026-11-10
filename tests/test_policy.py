@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import json
 import unittest
 from datetime import UTC, datetime, timedelta
 
-from agent_efficiency.digests import CALL_LABEL, keyed_digest
 from agent_efficiency.policy import PolicyPack, classify_task, classify_tool
 
 KEY = bytes(range(32))
@@ -108,16 +106,14 @@ class CallSignatureTests(unittest.TestCase):
     def signature(self, tool: str, tool_input: dict, key: bytes = KEY) -> str:
         return classify_tool(tool, tool_input, key=key).signature
 
-    def test_signature_is_a_keyed_digest_of_32_hex_characters(self) -> None:
-        tool_input = {"command": "rg -n needle src"}
-        payload = json.dumps(
-            {"tool": "Bash", "input": tool_input},
-            sort_keys=True,
-            separators=(",", ":"),
+    def test_signature_is_a_fixed_keyed_digest(self) -> None:
+        # HMAC-SHA256 under KEY of the call label, a zero byte, and
+        # {"input":{"command":"rg -n needle src"},"tool":"Bash"}, cut to 32
+        # hex characters. Computed once, outside this code.
+        self.assertEqual(
+            self.signature("Bash", {"command": "rg -n needle src"}),
+            "3ab7173cd173c13013b2ac425af658e3",
         )
-        expected = keyed_digest(KEY, CALL_LABEL, payload.encode("utf-8"))[:32]
-        self.assertEqual(self.signature("Bash", tool_input), expected)
-        self.assertRegex(expected, r"\A[0-9a-f]{32}\Z")
 
     def test_another_key_gives_another_signature(self) -> None:
         tool_input = {"command": "rg -n needle src"}
@@ -139,11 +135,24 @@ class CallSignatureTests(unittest.TestCase):
                 )
 
     def test_subagent_description_is_left_out(self) -> None:
-        for tool in ("Task", "Agent", "spawn_agent"):
+        for tool in ("Task", "Agent", "spawn_agent", "subagent"):
             with self.subTest(tool=tool):
                 self.assertEqual(
                     self.signature(tool, {"prompt": "p", "description": "one"}),
                     self.signature(tool, {"prompt": "p", "description": "two"}),
+                )
+
+    def test_a_tool_that_only_mentions_subagent_keeps_its_description(self) -> None:
+        tool = "mcp__tracker__create_subagent_task"
+        self.assertNotEqual(
+            self.signature(tool, {"title": "t", "description": "one"}),
+            self.signature(tool, {"title": "t", "description": "two"}),
+        )
+        for known in ("Task", "Bash"):
+            with self.subTest(tool=known):
+                self.assertEqual(
+                    self.signature(known, {"command": "c", "description": "one"}),
+                    self.signature(known, {"command": "c", "description": "two"}),
                 )
 
     def test_other_tools_keep_their_description(self) -> None:

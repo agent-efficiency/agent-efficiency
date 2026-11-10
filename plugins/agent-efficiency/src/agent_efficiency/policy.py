@@ -48,6 +48,8 @@ CODE_EXTENSIONS = {
     ".yaml",
     ".yml",
 }
+# Subagent tools whose ``description`` is free text, compared after casefold.
+SUBAGENT_TOOL_NAMES = frozenset({"agent", "task", "spawn_agent", "subagent"})
 
 
 def _parse_time(value: str) -> datetime:
@@ -257,7 +259,7 @@ def classify_tool(tool_name: str, tool_input: Any, *, key: bytes) -> ToolFacts:
         tool_name,
         safe_input,
         key=key,
-        drop_description=_is_shell_tool(lowered_name) or is_subagent,
+        drop_description=_drops_description(lowered_name),
     )
     is_validation = command_class in {"test", "lint", "typecheck", "build", "check"}
     return ToolFacts(
@@ -282,7 +284,7 @@ def _call_signature(
 ) -> str:
     """Fingerprint a call by its tool and input, keyed so it cannot be guessed.
 
-    A shell or subagent call carries a free-text ``description`` that the
+    A shell or known subagent call carries a free-text ``description`` that the
     agent rewrites between runs of the same command. It is left out for those
     tools, so the same command counts as a repeat. Other tools keep their
     whole input, because there ``description`` can be a real parameter.
@@ -302,9 +304,19 @@ def _call_signature(
     return keyed_digest(key, CALL_LABEL, payload.encode("utf-8"))[:32]
 
 
+def _drops_description(lowered_name: str) -> bool:
+    """Return whether ``description`` is free text for this tool.
+
+    Only shell tools and the known subagent tools qualify. A tool whose name
+    merely contains "subagent" keeps it, since there it can be a real input.
+    """
+
+    return _is_shell_tool(lowered_name) or lowered_name in SUBAGENT_TOOL_NAMES
+
+
 def _is_subagent_tool(lowered_name: str) -> bool:
     return (
-        lowered_name in {"agent", "spawn_agent", "task", "subagent"}
+        lowered_name in SUBAGENT_TOOL_NAMES
         or "spawn_agent" in lowered_name
         or "subagent" in lowered_name
     )
