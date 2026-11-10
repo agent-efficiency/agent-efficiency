@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import stat
 from pathlib import Path
@@ -27,6 +28,7 @@ from agent_efficiency.claude_folder import local_settings_root
 MAX_SETTINGS_BYTES = 1_048_576
 DATA_VARIABLE = "AGENT_EFFICIENCY_DATA"
 TOOL_COMMANDS = {"agent-efficiency", "agent_efficiency", "agent_efficiency_cli.py"}
+HOME_REFERENCE = re.compile(r"\$\{HOME\}|\$HOME(?![A-Za-z0-9_])")
 _OPEN_FLAGS = (
     os.O_RDONLY
     | getattr(os, "O_NOFOLLOW", 0)
@@ -212,26 +214,101 @@ def _data_settings(document: dict[str, Any]) -> list[tuple[str, Any, str]]:
 
 
 def _status_line_settings(command: str) -> list[tuple[str, Any, str]]:
+    """Return the data folder settings of each part of the command that runs
+    this tool.
+
+    The command is split at the shell control operators ``;``, ``&&``,
+    ``||``, ``|``, ``&``, and a newline, and only the parts that run this tool
+    are read. A part that only assigns or exports ``AGENT_EFFICIENCY_DATA``
+    applies to a later part that runs the tool, unless that part sets its own
+    value. A command this check cannot split is reported as not checked.
+    """
+
+    unreadable = [("statusLine.command", None, "")]
+    mentions_tool = "agent-efficiency" in command or "agent_efficiency" in command
+    parts = _command_parts(command)
+    if parts is None:
+        return unreadable if mentions_tool else []
+    found: list[tuple[str, Any, str]] = []
+    assigned: str | None = None
+    runs_tool = False
+    for words in parts:
+        exported = _assigned_data_folder(words)
+        if exported is not None:
+            assigned = exported
+            continue
+        if not any(Path(word).name in TOOL_COMMANDS for word in words):
+            continue
+        runs_tool = True
+        own = _part_settings(words)
+        if assigned is not None and not any(
+            word.startswith(f"{DATA_VARIABLE}=") for word in words
+        ):
+            own.insert(0, _prefix_setting(assigned))
+        found.extend(own)
+    if not runs_tool:
+        # The command runs this tool in a form this check cannot read.
+        return unreadable if mentions_tool else []
+    return found
+
+
+def _command_parts(command: str) -> list[list[str]] | None:
+    """Split a command into the words of each part between control operators.
+
+    Return None when the command does not split cleanly, or uses a subshell,
+    which this check does not read.
+    """
+
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|<>()\n")
+    lexer.whitespace = " \t\r"
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    parts: list[list[str]] = [[]]
     try:
-        words = shlex.split(command)
+        for token in lexer:
+            if token and set(token) <= set(";&|\n"):
+                parts.append([])
+            elif token and set(token) & set("()"):
+                return None
+            else:
+                parts[-1].append(token)
     except ValueError:
-        words = []
-    if not any(Path(word).name in TOOL_COMMANDS for word in words):
-        if "agent-efficiency" in command or "agent_efficiency" in command:
-            # The command runs this tool in a form this check cannot read.
-            return [("statusLine.command", None, "")]
-        return []
+        return None
+    return [words for words in parts if words]
+
+
+def _assigned_data_folder(words: list[str]) -> str | None:
+    """Return the data folder a part sets when the part only assigns or
+    exports variables, or None when it does something else."""
+
+    names = words[1:] if words[0] == "export" else words
+    if not names or not all(_is_assignment(word) for word in names):
+        return None
+    values = [
+        word.partition("=")[2] for word in names if word.startswith(f"{DATA_VARIABLE}=")
+    ]
+    return values[-1] if values else None
+
+
+def _is_assignment(word: str) -> bool:
+    name, equals, _ = word.partition("=")
+    return bool(equals) and name.isidentifier()
+
+
+def _prefix_setting(value: str) -> tuple[str, Any, str]:
+    return (
+        f"statusLine.command {DATA_VARIABLE}= prefix",
+        value,
+        f"change the {DATA_VARIABLE}= value in statusLine.command "
+        "in {file} to {root}",
+    )
+
+
+def _part_settings(words: list[str]) -> list[tuple[str, Any, str]]:
     found: list[tuple[str, Any, str]] = []
     for index, word in enumerate(words):
         if word.startswith(f"{DATA_VARIABLE}="):
-            found.append(
-                (
-                    f"statusLine.command {DATA_VARIABLE}= prefix",
-                    word.partition("=")[2],
-                    f"change the {DATA_VARIABLE}= value in statusLine.command "
-                    "in {file} to {root}",
-                )
-            )
+            found.append(_prefix_setting(word.partition("=")[2]))
         elif word == "--data-dir" or word.startswith("--data-dir="):
             value = (
                 word.partition("=")[2]
@@ -259,7 +336,8 @@ def _folder_named(value: Any, home: Path) -> Path | None:
 
     if not isinstance(value, str) or not value.strip() or "\0" in value:
         return None
-    text = value.replace("${HOME}", str(home)).replace("$HOME", str(home))
+    # $HOME counts only as a whole name: $HOMEDIR is another variable.
+    text = HOME_REFERENCE.sub(lambda _: str(home), value)
     if "$" in text:
         return None
     if text == "~" or text.startswith("~/"):
