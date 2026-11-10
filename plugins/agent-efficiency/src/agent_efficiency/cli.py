@@ -31,6 +31,7 @@ from agent_efficiency.capability_retrieval import (
 )
 from agent_efficiency.hook import format_session_status
 from agent_efficiency.claude_folder import claude_paths, folder_status
+from agent_efficiency.digests import KEY_NAME, MISSING, VALID, read_key
 from agent_efficiency.host_data import (
     CopyPending,
     settle_data_dir,
@@ -1476,6 +1477,7 @@ def _doctor(
         "data_dir_permissions": _permissions_message(root, readable),
         "data_copy": copy_error,
         "unused_data_dirs": unused_host_stores(root, os.environ, copy_error=copy_error),
+        "digest_key": _digest_key_status(root),
         "database": str(database),
         "database_ready": database.is_file(),
         "default_mode": store.default_mode() if store is not None else None,
@@ -1515,8 +1517,44 @@ def _doctor(
         and checks["embedded_capability_pack_ready"]
         and checks["host_packages_ready"] is not False
         and checks["installed_hosts_ready"]
+        and checks["digest_key"]["ok"]
     )
     return checks
+
+
+DIGEST_KEY_PROBLEMS = {
+    "file type": "is not a regular file",
+    "owner": "is owned by another user",
+    "mode": "can be read or changed by other users",
+    "size": "is not 65 bytes long",
+    "content": "does not hold 64 lowercase hex characters and a newline",
+    "unreadable": "could not be read",
+}
+
+
+def _digest_key_status(root: Path) -> dict[str, Any]:
+    """Describe the digest key file. The key itself is never reported."""
+
+    path = root / KEY_NAME
+    state = read_key(root).state
+    if state == VALID:
+        message = f"{path} is valid"
+    elif state == MISSING:
+        message = f"{path} does not exist yet; the first hook event creates it"
+    else:
+        problem = DIGEST_KEY_PROBLEMS.get(state, "is not valid")
+        message = (
+            f"{path} {problem}, so fingerprints use the built-in key and are "
+            "as easy to guess as an unkeyed hash. Agent Efficiency never "
+            "replaces or deletes this file. Move it aside, for example to "
+            f"{path}.bad, and the next hook event creates a new key."
+        )
+    return {
+        "path": str(path),
+        "state": state,
+        "ok": state in {VALID, MISSING},
+        "message": message,
+    }
 
 
 def _readable_by_others(root: Path) -> list[str]:
@@ -1661,6 +1699,7 @@ DOCTOR_TEXT_KEYS = (
     "data_dir_permissions",
     "data_copy",
     "unused_data_dirs",
+    "digest_key",
     "database",
     "default_mode",
     "active_policy_count",
@@ -1689,6 +1728,8 @@ def _format_doctor(result: dict[str, Any]) -> str:
             lines.extend(_format_package(result.get("package_root"), value))
         elif key == "installed_hosts":
             lines.extend(_format_installed(value))
+        elif key == "digest_key":
+            lines.append(f"digest_key: {value['message']}")
         elif key == "unused_data_dirs":
             if not value:
                 lines.append(f"{key}: none")
