@@ -77,28 +77,45 @@ developer filesystem permissions. Do not commit it.
 
 ## Guard mode and the project config
 
-A session that runs in guard pins the digest of the project's
-`agent-efficiency.toml` the first time. If the file later changes, stops
-loading, or is removed, guard stays on. When the agent stops after a code
-change, it is asked once per turn, in fixed text, to tell the user. The
-agent cannot accept the change; the user accepts it by typing
-`$agent-efficiency guard` in the session. A file that exists but does not
-load turns guard on. The pin lasts for one session.
+Guard reads `agent-efficiency.toml` only from the working directory of each
+hook event. It does not search parent folders. A session that runs in guard
+pins the digest of the file the first time. If the file later differs from
+the pinned one, is not a valid config, or is not in the working directory,
+guard stays on. When the agent stops after a code change, it is asked once
+per turn, in fixed text, to tell the user. The agent cannot accept a changed
+file; the user accepts it by typing `$agent-efficiency guard` in the session.
+A file that exists but is not a valid config turns guard on. A file larger
+than 256 KiB, or one that is not a regular file (such as a folder or a named
+pipe), is not a valid config. The pin lasts for one session.
 
-The terminal command `agent-efficiency mode guard` also pins the current
-file. An agent with shell access can run it, as it can edit the database:
-the store resists mistakes, not deliberate tampering by an agent with shell
-access. `doctor` reports whether Claude Code asks before it runs
-`agent-efficiency`, `git merge`, and `gh` in a folder, so the choice is
-visible. It never changes those settings.
+Terminal commands can also change the pin. `agent-efficiency mode guard`
+pins the current file. The other terminal mode commands (`mode advise`,
+`mode observe`, `mode off`, and the short forms such as `agent-efficiency
+off`) and `agent-efficiency experiment enroll` clear the pin. After `advise`
+or `on`, the next hook event pins the file it finds if that file sets guard;
+`observe` and `off` turn guard off for the session. An agent with shell
+access can run these commands, as it can edit the database: the store
+resists mistakes, not deliberate tampering by an agent with shell access.
+
+`doctor` reports whether Claude Code asks before it runs `agent-efficiency`,
+`git merge`, and `gh` in a folder, so the choice is visible. For this tool it
+matches only the bare command name `agent-efficiency`. A rule that allows an
+interpreter or a full path, such as `Bash(python3:*)`, can also run the tool,
+and the report does not evaluate it. A rule whose command holds a tab, a
+newline, or a run of spaces is listed as not interpreted. Managed settings
+and command-line options are not checked. `doctor` never changes these
+settings.
 
 ## Host settings
 
 `doctor` reads Claude Code settings files to find a split data folder and
 to report permission rules. It treats them as untrusted input: it reads at
 most 1 MiB of each, does not follow a link out of the settings folder, and
-reports a file it cannot parse as one that could not be read. It never
-edits them.
+reports a file it cannot parse as one that could not be read. A setting it
+cannot resolve to a folder is reported as not checked. In the text form of
+these two reports, each value from a settings file is shown on one line,
+with control characters escaped, and cut to 200 characters. It never edits
+settings files.
 
 ## Guidance integrity
 

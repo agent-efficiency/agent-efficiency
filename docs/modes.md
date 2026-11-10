@@ -110,21 +110,38 @@ sessions in that project. `observe` and `off` stay as they are.
 
 ### When the config changes during a session
 
-The first guard event of a session pins the digest of `agent-efficiency.toml`.
-After that, guard stays on for the rest of the session in each of these cases:
+Guard reads `agent-efficiency.toml` only from the agent's working directory,
+not from parent folders. A file larger than 256 KiB, or one that is not a
+regular file, is not a valid config.
+
+The first guard event of a session pins the digest of the file. After that,
+guard stays on for the rest of the session in each of these cases:
 
 | The file | What guard does |
 | --- | --- |
-| changed, including a change to `mode = "advise"` | When the agent stops after a code change, it is asked once per turn to tell you. Required checks wait until the change is accepted or undone. |
+| differs from the pinned one, including a change to `mode = "advise"` | When the agent stops after a code change, it is asked once per turn to tell you. Required checks wait until the change is accepted or undone. |
 | exists but is not a valid config | The same. This also turns guard on in an `advise` session. |
-| removed | The same. |
+| is not in the working directory | The same. |
 
 The agent cannot accept a changed file. To accept it, type
 `$agent-efficiency guard` in the session, or `$agent-efficiency advise` if the
-file no longer sets guard. After the file was removed, type
-`$agent-efficiency advise` to leave guard. Restoring the file also ends the
-state. The pin lasts for one session: a new session pins the file it finds.
+file no longer sets guard. Restoring the file also ends the state. Fix or
+restore a file that is not a valid config.
 
-`agent-efficiency mode guard` in a terminal pins the current file too. An agent
-with shell access can run it. `agent-efficiency doctor` shows whether Claude
-Code asks before it runs `agent-efficiency` in the project.
+A file that differs can also mean the agent's working directory moved to
+another project. A file that is not found can mean the working directory
+moved to a subfolder; guard checks apply again once it is back in the project
+folder. If the file was removed, restore it, or type `$agent-efficiency
+advise` to leave guard. The pin lasts for one session: a new session pins the
+file it finds.
+
+Terminal commands can change the pin too. `agent-efficiency mode guard` pins
+the current file. The other terminal mode commands, such as
+`agent-efficiency off` or `agent-efficiency mode advise`, and
+`agent-efficiency experiment enroll` clear the pin. After `advise`, the next
+event pins the file it finds if that file sets guard; `observe` and `off` turn
+guard off for the session. An agent with shell access can run these commands.
+`agent-efficiency doctor` shows whether Claude Code asks before it runs
+`agent-efficiency` in the project. It matches only that bare command name, so
+a rule that allows an interpreter, such as `Bash(python3:*)`, is not
+evaluated.

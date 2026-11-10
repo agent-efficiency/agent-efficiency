@@ -7,42 +7,69 @@
 - Keep guard mode on when the project config changes, breaks, or is removed
   during a session. Before, a config that failed to load turned guard into
   advise, and a changed config was accepted without asking. Now a session
-  pins the config the first time it runs in guard. If the file later changes,
-  stops loading, or is removed, guard stays on, and when the agent stops after
-  a code change it is asked once per turn to tell you. Only you can accept the
-  change, by typing `$agent-efficiency guard` (or `$agent-efficiency advise`
-  when the file no longer sets guard) in the session. A config file that exists
-  but does not load also turns guard on in an `advise` session.
+  pins the config the first time it runs in guard. If the file later differs
+  from the pinned one, is not a valid config, or is not in the working
+  directory, guard stays on, and when the agent stops after a code change it
+  is asked once per turn to tell you. Only you can accept a changed file, by
+  typing `$agent-efficiency guard` (or `$agent-efficiency advise` when the
+  file no longer sets guard) in the session. A config file that exists but
+  does not load also turns guard on in an `advise` session.
+- Treat a project config larger than 256 KiB, one that is not a regular file
+  (such as a named pipe), or one nested too deeply to parse as not valid. The
+  file is opened without waiting, so such a file can no longer stall or crash
+  a hook.
 - Count a shell or subagent call that repeats a command with a new
   description as a repeat. The free-text description is no longer part of the
-  call fingerprint for those tools.
+  call fingerprint for shell tools and the subagent tools `Task`, `Agent`,
+  `spawn_agent`, and `subagent`. Other tools keep it.
 
 ### Added
 
 - Action fingerprints are keyed with a private key in the data folder,
   `digest.key`, created with mode 0600 on first use and never replaced.
-  Fingerprints stored before this release keep their old form.
+  Fingerprints stored before this release keep their old form. Where the
+  system has no user ids, the key file's owner and mode are not checked.
 - `doctor` reports the digest key and fails when the key file is not valid. It
-  never prints the key.
+  says when the key cannot be created because the data folder is not
+  writable. It never prints the key.
 - `doctor` names each Claude Code setting that sends hook or status line
   writes to a data folder other than its own, with the setting to change, and
   fails while the store is split. It reads `env.AGENT_EFFICIENCY_DATA`, and
   `--data-dir` or an `AGENT_EFFICIENCY_DATA=` prefix in `statusLine.command`,
   from the `CLAUDE_CONFIG_DIR` folder, `~/.claude`, the project settings, and
-  each folder given with the new `--host-config` option. It never edits a
-  settings file. Codex and Cursor are reported as not checked.
+  each folder given with the new `--host-config` option. In
+  `statusLine.command` it reads only the parts that run this tool, and an
+  earlier part that assigns or exports the data folder. A setting it cannot
+  resolve is reported as not checked. It never edits a settings file. Codex
+  and Cursor are reported as not checked.
 - `doctor` reports whether `git merge`, `gh`, and `agent-efficiency` need a
   permission prompt in Claude Code for the folder it checks: allow, ask, deny,
-  or not set, with the rules and files that decide it. This report does not
-  change the doctor result.
+  or not set, with the rules and files that decide it. A rule whose command
+  holds a tab, a newline, or a run of spaces is listed as not interpreted.
+  This report does not change the doctor result.
+- `doctor` treats settings files as untrusted. A file it cannot parse,
+  including one nested too deeply, is reported as not read. A trust file
+  (`.claude.json`) that is not a regular file of at most 64 MiB counts as no
+  saved trust. In the text output of the settings and permission reports,
+  each settings value is shown on one line, with control characters escaped,
+  and cut to 200 characters.
 
 ### Known limits
 
 - Accepting a changed config lasts for the current session. A new session pins
   the file it finds.
-- `agent-efficiency mode guard` in a terminal also pins the current file, and
-  an agent with shell access can run it. The permission report shows whether
-  Claude Code asks before it runs `agent-efficiency`.
+- Guard reads the project config only from the working directory of each
+  event, not from parent folders. After a session pins the config, when the
+  agent works in a subfolder or another project, guard stays on and reports
+  the file as not found or different.
+- Terminal mode commands and `agent-efficiency experiment enroll` can also
+  change the pin. `agent-efficiency mode guard` pins the current file, and
+  the other mode commands and enrollment clear the pin or turn guard off. An
+  agent with shell access can run them.
+- The permission report matches only the bare `agent-efficiency` command
+  name. A rule that allows an interpreter or a full path, such as
+  `Bash(python3:*)`, can also run the tool and is not evaluated; the report
+  says so.
 
 ## 0.2.2 - 2026-11-06
 
