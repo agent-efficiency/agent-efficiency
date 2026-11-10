@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 from agent_efficiency.cli import main
-from tests.test_doctor import isolated_home
+from tests.test_doctor import isolated_home, write_json
 
 VALID_TEXT = "0123456789abcdef" * 4 + "\n"
 
@@ -76,3 +76,188 @@ class DigestKeyDoctorTests(DoctorCase):
         self.assertNotIn(VALID_TEXT.strip(), json.dumps(doctor))
         self.assertEqual(path.read_text(encoding="ascii"), VALID_TEXT)
         self.assertEqual(path.stat().st_mode & 0o777, 0o644)
+
+
+class DataFolderSettingsTests(DoctorCase):
+    """Settings that send hook or status line writes to another data folder."""
+
+    def user_settings(self, value: dict, folder: Path | None = None) -> Path:
+        path = (folder or self.home / ".claude") / "settings.json"
+        write_json(path, value)
+        return path
+
+    def report(
+        self, *extra: str, env: dict[str, str] | None = None
+    ) -> tuple[int, dict]:
+        code, doctor = self.doctor(*extra, env=env)
+        assert isinstance(doctor, dict)
+        return code, doctor["data_dir_settings"]
+
+    def test_no_settings_is_one_store(self) -> None:
+        code, report = self.report()
+        self.assertEqual(code, 0)
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["findings"], [])
+        self.assertEqual(report["data_dir"], str(self.data))
+
+    def test_env_for_another_folder_is_a_split(self) -> None:
+        path = self.user_settings({"env": {"AGENT_EFFICIENCY_DATA": self.other}})
+        code, report = self.report()
+        self.assertEqual(code, 1)
+        self.assertFalse(report["ok"])
+        self.assertEqual(
+            report["findings"],
+            [
+                {
+                    "file": str(path),
+                    "setting": "env.AGENT_EFFICIENCY_DATA",
+                    "folder": self.other,
+                    "fix": (
+                        f"change env.AGENT_EFFICIENCY_DATA in {path} to {self.data}"
+                    ),
+                }
+            ],
+        )
+
+    def test_env_for_the_same_folder_is_one_store(self) -> None:
+        self.user_settings({"env": {"AGENT_EFFICIENCY_DATA": "~/data"}})
+        code, report = self.report()
+        self.assertEqual(code, 0)
+        self.assertEqual(report["findings"], [])
+
+    def test_status_line_data_dir_for_another_folder_is_a_split(self) -> None:
+        commands = (
+            f"agent-efficiency --data-dir {self.other} statusline",
+            f"/opt/tools/bin/agent-efficiency --data-dir={self.other} statusline",
+            f"AGENT_EFFICIENCY_DATA={self.other} agent-efficiency statusline",
+            "env AGENT_EFFICIENCY_DATA=$HOME/other agent-efficiency statusline",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.user_settings(
+                    {"statusLine": {"type": "command", "command": command}}
+                )
+                code, report = self.report()
+                self.assertEqual(code, 1)
+                self.assertEqual(len(report["findings"]), 1)
+                finding = report["findings"][0]
+                self.assertTrue(finding["setting"].startswith("statusLine.command"))
+                self.assertIn(finding["folder"], {self.other, str(self.home / "other")})
+                self.assertIn("statusLine.command", finding["fix"])
+
+    def test_a_status_line_for_another_tool_is_ignored(self) -> None:
+        self.user_settings(
+            {"statusLine": {"type": "command", "command": "other-tool --data-dir /x"}}
+        )
+        code, report = self.report()
+        self.assertEqual(code, 0)
+        self.assertEqual(report["findings"], [])
+
+    def test_two_profiles_that_split_the_store_are_both_named(self) -> None:
+        first = self.home / "profile-one"
+        second = self.home / "profile-two"
+        self.user_settings(
+            {"env": {"AGENT_EFFICIENCY_DATA": str(self.home / "one")}}, first
+        )
+        self.user_settings(
+            {
+                "statusLine": {
+                    "command": f"agent-efficiency --data-dir {self.home}/two statusline"
+                }
+            },
+            second,
+        )
+        code, report = self.report(
+            "--host-config", str(first), "--host-config", str(second)
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(
+            [(item["file"], item["folder"]) for item in report["findings"]],
+            [
+                (str(first / "settings.json"), str(self.home / "one")),
+                (str(second / "settings.json"), str(self.home / "two")),
+            ],
+        )
+
+    def test_the_claude_config_dir_profile_is_checked(self) -> None:
+        config = self.home / "config"
+        path = self.user_settings(
+            {"env": {"AGENT_EFFICIENCY_DATA": self.other}}, config
+        )
+        code, report = self.report()
+        self.assertEqual(report["findings"], [])
+        code, report = self.report(env={"CLAUDE_CONFIG_DIR": str(config)})
+        self.assertEqual(code, 1)
+        self.assertEqual([item["file"] for item in report["findings"]], [str(path)])
+
+    def test_project_settings_are_checked(self) -> None:
+        path = self.project / ".claude" / "settings.local.json"
+        write_json(path, {"env": {"AGENT_EFFICIENCY_DATA": self.other}})
+        code, report = self.report()
+        self.assertEqual(code, 1)
+        self.assertEqual(report["findings"][0]["file"], str(path))
+
+    def test_settings_that_cannot_be_read_are_named_not_failed(self) -> None:
+        settings = self.home / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text("{not json", encoding="utf-8")
+        code, report = self.report()
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            report["problems"],
+            [
+                {
+                    "file": str(settings),
+                    "status": "could not be read: it is not valid JSON",
+                }
+            ],
+        )
+
+    def test_a_link_out_of_the_config_folder_is_not_followed(self) -> None:
+        outside = self.home / "elsewhere.json"
+        write_json(outside, {"env": {"AGENT_EFFICIENCY_DATA": self.other}})
+        settings = self.home / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.symlink_to(outside)
+        code, report = self.report()
+        self.assertEqual(code, 0)
+        self.assertEqual(report["findings"], [])
+        self.assertIn("outside", report["problems"][0]["status"])
+
+    def test_a_large_settings_file_is_not_read(self) -> None:
+        settings = self.home / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text(
+            json.dumps(
+                {"env": {"AGENT_EFFICIENCY_DATA": self.other}, "pad": "x" * 1_100_000}
+            ),
+            encoding="utf-8",
+        )
+        code, report = self.report()
+        self.assertEqual(code, 0)
+        self.assertIn("larger than", report["problems"][0]["status"])
+
+    def test_a_folder_doctor_cannot_resolve_is_named_not_guessed(self) -> None:
+        self.user_settings({"env": {"AGENT_EFFICIENCY_DATA": "$DATA_ROOT/store"}})
+        code, report = self.report()
+        self.assertEqual(code, 0)
+        self.assertEqual(report["findings"], [])
+        self.assertIn("so it was not checked", report["problems"][0]["status"])
+
+    def test_doctor_never_edits_a_settings_file(self) -> None:
+        path = self.user_settings({"env": {"AGENT_EFFICIENCY_DATA": self.other}})
+        before = path.read_bytes()
+        self.report()
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_other_hosts_are_reported_as_not_checked(self) -> None:
+        _, report = self.report()
+        self.assertIn("not checked", report["not_checked"]["codex"])
+        self.assertIn("not checked", report["not_checked"]["cursor"])
+
+    def test_text_output_names_the_split_and_the_fix(self) -> None:
+        self.user_settings({"env": {"AGENT_EFFICIENCY_DATA": self.other}})
+        code, text = self.doctor(text=True)
+        self.assertEqual(code, 1)
+        self.assertIn(f"sets env.AGENT_EFFICIENCY_DATA to {self.other}", text)
+        self.assertIn("    fix: change env.AGENT_EFFICIENCY_DATA", text)
