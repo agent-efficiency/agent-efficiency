@@ -248,7 +248,8 @@ class GuardSessionTests(GuardSessionCase):
 class GuardStopTests(GuardSessionCase):
     """Stop after a code edit when the project config is no longer the pinned one."""
 
-    def edit_and_stop(self, turn: str = "turn-1") -> object:
+    def edit_and_stop(self, turn: str = "turn-1", cwd: Path | None = None) -> object:
+        where = {"cwd": str(cwd)} if cwd else {}
         (self.root / "app.py").write_text(f"value = {turn!r}\n")
         self.hook(
             "PostToolUse",
@@ -256,8 +257,9 @@ class GuardStopTests(GuardSessionCase):
             tool_name="Write",
             tool_input={"file_path": str(self.root / "app.py")},
             tool_response={"success": True},
+            **where,
         )
-        return self.hook("Stop", turn, stop_hook_active=False)
+        return self.hook("Stop", turn, stop_hook_active=False, **where)
 
     def start(self) -> None:
         self.prompt("Implement a substantial code change with tests.")
@@ -278,7 +280,9 @@ class GuardStopTests(GuardSessionCase):
         self.start()
         self.config.write_text(guard_config(timeout=60).replace("unit", MARKER))
         output = self.edit_and_stop()
-        self.assert_blocked(output, "guard.config-changed", "changed during this")
+        self.assert_blocked(
+            output, "guard.config-changed", "differs from the one this session pinned"
+        )
         self.assertIsNone(self.hook("Stop", stop_hook_active=False))
 
     def test_config_changed_to_advise_still_asks(self) -> None:
@@ -310,7 +314,20 @@ class GuardStopTests(GuardSessionCase):
         self.start()
         self.config.unlink()
         output = self.edit_and_stop()
-        self.assert_blocked(output, "guard.config-missing", "was removed")
+        self.assert_blocked(
+            output, "guard.config-missing", "not in the working directory"
+        )
+
+    def test_an_event_from_a_subfolder_keeps_the_pin(self) -> None:
+        self.start()
+        first = self.pin()
+        subfolder = self.root / "pkg"
+        subfolder.mkdir()
+        output = self.edit_and_stop(cwd=subfolder)
+        self.assert_blocked(
+            output, "guard.config-missing", "If the working directory changed"
+        )
+        self.assertEqual(self.pin(), first)
 
     def test_a_turn_without_code_edits_is_not_asked(self) -> None:
         self.start()
@@ -330,7 +347,9 @@ class GuardStopTests(GuardSessionCase):
         self.start()
         self.config.write_text(guard_config(timeout=60))
         self.assert_blocked(
-            self.edit_and_stop(), "guard.config-changed", "changed during this"
+            self.edit_and_stop(),
+            "guard.config-changed",
+            "differs from the one this session pinned",
         )
         self.prompt("$agent-efficiency guard", turn="turn-2")
         self.assertEqual(self.pin(), load_project_config(self.root).digest)
@@ -376,4 +395,6 @@ class GuardStopTests(GuardSessionCase):
             {**base, "hook_event_name": "stop", "loop_count": 0}, store=self.store
         )
         assert isinstance(output, dict)
-        self.assertIn("changed during this", output["followup_message"])
+        self.assertIn(
+            "differs from the one this session pinned", output["followup_message"]
+        )
