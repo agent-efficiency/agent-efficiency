@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agent_efficiency.cli import main
+from agent_efficiency.cli import _digest_key_status, main
 from agent_efficiency.permission_report import coverage, interpret_rule
 from tests.test_doctor import isolated_home, write_json
 
@@ -55,6 +55,18 @@ class DigestKeyDoctorTests(DoctorCase):
         self.assertEqual(code, 0)
         self.assertEqual(doctor["digest_key"]["state"], "missing")
         self.assertTrue(doctor["digest_key"]["ok"])
+        self.assertFalse((self.data / "digest.key").exists())
+
+    @unittest.skipIf(os.geteuid() == 0, "root can write to a read-only folder")
+    def test_a_key_that_cannot_be_created_is_reported(self) -> None:
+        self.data.mkdir(mode=0o500)
+        self.addCleanup(os.chmod, self.data, 0o700)
+        status = _digest_key_status(self.data)
+        self.assertEqual(status["state"], "missing")
+        self.assertTrue(status["ok"])
+        self.assertIn("cannot be created", status["message"])
+        self.assertIn("built-in key", status["message"])
+        self.assertNotIn("the first hook event creates it", status["message"])
         self.assertFalse((self.data / "digest.key").exists())
 
     def test_a_valid_key_is_reported_and_never_printed(self) -> None:
