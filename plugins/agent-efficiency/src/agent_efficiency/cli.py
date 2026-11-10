@@ -37,6 +37,7 @@ from agent_efficiency.host_data import (
     settle_data_dir,
     unused_host_stores,
 )
+from agent_efficiency.host_settings import claude_config_folders, data_folder_settings
 from agent_efficiency.models import VALID_MODES
 from agent_efficiency.paths import (
     PACKAGE_DIR,
@@ -167,6 +168,16 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument(
         "--cwd",
         help="Folder to check host enablement for. Defaults to the current folder.",
+    )
+    doctor.add_argument(
+        "--host-config",
+        action="append",
+        default=[],
+        metavar="DIR",
+        help=(
+            "Another Claude Code config folder to check for data folder and "
+            "permission settings. Repeat it for each folder."
+        ),
     )
 
     smoke = subparsers.add_parser(
@@ -319,7 +330,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     except CopyPending as exc:
         if args.command == "doctor":
             folder = Path(args.cwd) if args.cwd else Path.cwd()
-            result = _doctor(None, folder, root=exc.target, copy_error=str(exc))
+            result = _doctor(
+                None,
+                folder,
+                root=exc.target,
+                copy_error=str(exc),
+                host_configs=args.host_config,
+            )
             _emit(result if args.json else _format_doctor(result), args.json)
             return 1
         print(str(exc), file=sys.stderr)
@@ -372,7 +389,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         _emit(explanation if args.json else format_explanation(explanation), args.json)
         return 0
     if args.command == "doctor":
-        result = _doctor(store, Path(args.cwd) if args.cwd else Path.cwd())
+        result = _doctor(
+            store,
+            Path(args.cwd) if args.cwd else Path.cwd(),
+            host_configs=args.host_config,
+        )
         _emit(result if args.json else _format_doctor(result), args.json)
         return 0 if result["ok"] else 1
     if args.command == "migrate":
@@ -1408,12 +1429,15 @@ def _doctor(
     *,
     root: Path | None = None,
     copy_error: str | None = None,
+    host_configs: Sequence[str | Path] = (),
 ) -> dict[str, Any]:
     """Check the installation. ``store`` is None while an old store waits to
     be copied; doctor then reports why and creates nothing."""
 
     root = store.paths.root if store is not None else root
     assert root is not None
+    here = folder or Path.cwd()
+    config_folders = claude_config_folders(os.environ, Path.home(), host_configs)
     database = root / "agent-efficiency.db"
     try:
         capability_pack = load_bundled_capability_pack()
@@ -1433,7 +1457,7 @@ def _doctor(
         embedded_capability_pack_digest = None
 
     hosts = _host_package_status()
-    installed = _installed_host_status(folder or Path.cwd())
+    installed = _installed_host_status(here)
     minimum_python = ".".join(str(part) for part in MINIMUM_PYTHON)
     hook_path, hook_version = _hook_python()
     # Hooks run python3 from PATH. One that is missing or does not answer is
@@ -1477,6 +1501,9 @@ def _doctor(
         "data_dir_permissions": _permissions_message(root, readable),
         "data_copy": copy_error,
         "unused_data_dirs": unused_host_stores(root, os.environ, copy_error=copy_error),
+        "data_dir_settings": data_folder_settings(
+            root, config_folders, here, Path.home()
+        ),
         "digest_key": _digest_key_status(root),
         "database": str(database),
         "database_ready": database.is_file(),
@@ -1517,6 +1544,7 @@ def _doctor(
         and checks["embedded_capability_pack_ready"]
         and checks["host_packages_ready"] is not False
         and checks["installed_hosts_ready"]
+        and checks["data_dir_settings"]["ok"]
         and checks["digest_key"]["ok"]
     )
     return checks
@@ -1699,6 +1727,7 @@ DOCTOR_TEXT_KEYS = (
     "data_dir_permissions",
     "data_copy",
     "unused_data_dirs",
+    "data_dir_settings",
     "digest_key",
     "database",
     "default_mode",
@@ -1728,6 +1757,8 @@ def _format_doctor(result: dict[str, Any]) -> str:
             lines.extend(_format_package(result.get("package_root"), value))
         elif key == "installed_hosts":
             lines.extend(_format_installed(value))
+        elif key == "data_dir_settings":
+            lines.extend(_format_data_dir_settings(value))
         elif key == "digest_key":
             lines.append(f"digest_key: {value['message']}")
         elif key == "unused_data_dirs":
@@ -1742,6 +1773,24 @@ def _format_doctor(result: dict[str, Any]) -> str:
         else:
             lines.append(f"{key}: {value}")
     return "\n".join(lines)
+
+
+def _format_data_dir_settings(value: dict[str, Any]) -> list[str]:
+    lines = [f"data_dir_settings: {value['summary']}"]
+    for finding in value["findings"]:
+        lines.append(
+            f"  split: {finding['file']} sets {finding['setting']} to "
+            f"{finding['folder']}"
+        )
+        lines.append(f"    fix: {finding['fix']}")
+    lines.extend(
+        f"  {problem['file']}: {problem['status']}" for problem in value["problems"]
+    )
+    lines.extend(
+        f"  {HOST_NAMES.get(name, name)}: {text}"
+        for name, text in value["not_checked"].items()
+    )
+    return lines
 
 
 def _format_package(root: Any, hosts: dict[str, Any]) -> list[str]:
