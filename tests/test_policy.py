@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
 import unittest
 from datetime import UTC, datetime, timedelta
 
+from agent_efficiency.digests import CALL_LABEL, keyed_digest
 from agent_efficiency.policy import PolicyPack, classify_task, classify_tool
+
+KEY = bytes(range(32))
 
 
 class TaskClassificationTests(unittest.TestCase):
@@ -67,6 +71,7 @@ class ToolClassificationTests(unittest.TestCase):
         facts = classify_tool(
             "Write",
             {"file_path": "/repo/src/app.py", "content": private_marker},
+            key=KEY,
         )
         self.assertTrue(facts.is_edit)
         self.assertTrue(facts.is_code_edit)
@@ -75,25 +80,83 @@ class ToolClassificationTests(unittest.TestCase):
         self.assertNotIn(private_marker, facts.signature)
 
     def test_test_command_is_validation(self) -> None:
-        facts = classify_tool("Bash", {"command": "python -m pytest tests/test_api.py"})
+        facts = classify_tool(
+            "Bash", {"command": "python -m pytest tests/test_api.py"}, key=KEY
+        )
         self.assertEqual(facts.command_class, "test")
         self.assertTrue(facts.is_validation)
 
     def test_root_filesystem_scan_is_broad(self) -> None:
-        facts = classify_tool("Bash", {"command": "find / -name '*.py'"})
+        facts = classify_tool("Bash", {"command": "find / -name '*.py'"}, key=KEY)
         self.assertTrue(facts.is_broad_scan)
 
     def test_repository_search_is_not_broad(self) -> None:
-        facts = classify_tool("Bash", {"command": "rg -n 'handler' src tests"})
+        facts = classify_tool("Bash", {"command": "rg -n 'handler' src tests"}, key=KEY)
         self.assertFalse(facts.is_broad_scan)
 
     def test_markdown_only_patch_is_not_code_edit(self) -> None:
         facts = classify_tool(
             "apply_patch",
             {"patch": "*** Update File: README.md\n@@\n-old\n+new\n"},
+            key=KEY,
         )
         self.assertTrue(facts.is_edit)
         self.assertFalse(facts.is_code_edit)
+
+
+class CallSignatureTests(unittest.TestCase):
+    def signature(self, tool: str, tool_input: dict, key: bytes = KEY) -> str:
+        return classify_tool(tool, tool_input, key=key).signature
+
+    def test_signature_is_a_keyed_digest_of_32_hex_characters(self) -> None:
+        tool_input = {"command": "rg -n needle src"}
+        payload = json.dumps(
+            {"tool": "Bash", "input": tool_input},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        expected = keyed_digest(KEY, CALL_LABEL, payload.encode("utf-8"))[:32]
+        self.assertEqual(self.signature("Bash", tool_input), expected)
+        self.assertRegex(expected, r"\A[0-9a-f]{32}\Z")
+
+    def test_another_key_gives_another_signature(self) -> None:
+        tool_input = {"command": "rg -n needle src"}
+        self.assertNotEqual(
+            self.signature("Bash", tool_input),
+            self.signature("Bash", tool_input, key=bytes(32)),
+        )
+
+    def test_shell_description_is_left_out(self) -> None:
+        for tool in ("Bash", "shell", "exec_command"):
+            with self.subTest(tool=tool):
+                self.assertEqual(
+                    self.signature(tool, {"command": "ls", "description": "List"}),
+                    self.signature(tool, {"command": "ls", "description": "Look"}),
+                )
+                self.assertEqual(
+                    self.signature(tool, {"command": "ls", "description": "List"}),
+                    self.signature(tool, {"command": "ls"}),
+                )
+
+    def test_subagent_description_is_left_out(self) -> None:
+        for tool in ("Task", "Agent", "spawn_agent"):
+            with self.subTest(tool=tool):
+                self.assertEqual(
+                    self.signature(tool, {"prompt": "p", "description": "one"}),
+                    self.signature(tool, {"prompt": "p", "description": "two"}),
+                )
+
+    def test_other_tools_keep_their_description(self) -> None:
+        self.assertNotEqual(
+            self.signature("WebSearch", {"query": "q", "description": "one"}),
+            self.signature("WebSearch", {"query": "q", "description": "two"}),
+        )
+
+    def test_a_different_command_is_a_different_call(self) -> None:
+        self.assertNotEqual(
+            self.signature("Bash", {"command": "ls", "description": "List"}),
+            self.signature("Bash", {"command": "ls -a", "description": "List"}),
+        )
 
 
 if __name__ == "__main__":
