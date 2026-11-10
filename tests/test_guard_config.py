@@ -2,17 +2,25 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 from agent_efficiency.hook import _guard_status, run_hook
+from agent_efficiency.paths import PLUGIN_ROOT
 from agent_efficiency.store import Store
-from agent_efficiency.verification.config import ConfigMissing, load_project_config
+from agent_efficiency.verification.config import (
+    MAX_CONFIG_BYTES,
+    ConfigMissing,
+    load_project_config,
+)
 
 
 CLAUDE_ENV = {"CLAUDE_PLUGIN_ROOT": "/plugin"}
 MARKER = "repository-text-marker-7731"
+# Nesting this deep makes the TOML parser run out of recursion depth.
+DEEP_CONFIG = "version = 1\nx = " + "[" * 600 + "]" * 600 + "\n"
 # Keep the machine's own git settings, such as global hooks, out of the tests.
 GIT_ENV = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
 
@@ -51,6 +59,66 @@ class ConfigLoadTests(unittest.TestCase):
         with self.assertRaises(ValueError) as caught:
             load_project_config(self.root)
         self.assertNotIsInstance(caught.exception, ConfigMissing)
+
+    def assert_invalid(self) -> ValueError:
+        with self.assertRaises(ValueError) as caught:
+            load_project_config(self.root)
+        self.assertNotIsInstance(caught.exception, ConfigMissing)
+        self.assertNotIn(MARKER, str(caught.exception))
+        return caught.exception
+
+    def test_a_deeply_nested_config_is_invalid(self) -> None:
+        (self.root / "agent-efficiency.toml").write_text(DEEP_CONFIG)
+        self.assert_invalid()
+
+    def test_a_config_over_the_size_limit_is_invalid(self) -> None:
+        padding = f"# {MARKER}\n" * (MAX_CONFIG_BYTES // 20)
+        (self.root / "agent-efficiency.toml").write_text(guard_config() + padding)
+        self.assertGreater(
+            (self.root / "agent-efficiency.toml").stat().st_size, MAX_CONFIG_BYTES
+        )
+        self.assert_invalid()
+
+    def test_a_config_at_the_size_limit_loads(self) -> None:
+        text = guard_config()
+        text += "#" * (MAX_CONFIG_BYTES - len(text) - 1) + "\n"
+        (self.root / "agent-efficiency.toml").write_text(text)
+        self.assertEqual(load_project_config(self.root).mode, "guard")
+
+    def test_a_directory_at_the_config_path_is_invalid(self) -> None:
+        (self.root / "agent-efficiency.toml").mkdir()
+        self.assert_invalid()
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "needs named pipes")
+    def test_a_named_pipe_at_the_config_path_is_invalid_without_waiting(
+        self,
+    ) -> None:
+        os.mkfifo(self.root / "agent-efficiency.toml")
+        script = (
+            "import sys\n"
+            "from agent_efficiency.verification.config import (\n"
+            "    ConfigMissing, load_project_config)\n"
+            "try:\n"
+            "    load_project_config(sys.argv[1])\n"
+            "except ConfigMissing:\n"
+            "    print('missing')\n"
+            "except ValueError:\n"
+            "    print('invalid')\n"
+            "else:\n"
+            "    print('loaded')\n"
+        )
+        environment = {**os.environ, "PYTHONPATH": str(PLUGIN_ROOT / "src")}
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", script, str(self.root)],
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+        except subprocess.TimeoutExpired:
+            self.fail("loading a named pipe as the config did not return")
+        self.assertEqual(result.stdout.strip(), "invalid", result.stderr)
 
 
 class GuardStatusTests(unittest.TestCase):
@@ -222,6 +290,12 @@ class GuardStopTests(GuardSessionCase):
     def test_unreadable_config_asks(self) -> None:
         self.start()
         self.config.write_text(f'version = 1\nmode = "advise" {MARKER}\n')
+        output = self.edit_and_stop()
+        self.assert_blocked(output, "guard.config-unreadable", "not a valid config")
+
+    def test_a_deeply_nested_config_asks(self) -> None:
+        self.start()
+        self.config.write_text(DEEP_CONFIG)
         output = self.edit_and_stop()
         self.assert_blocked(output, "guard.config-unreadable", "not a valid config")
 

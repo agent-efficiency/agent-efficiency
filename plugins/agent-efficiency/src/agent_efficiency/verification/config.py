@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +15,11 @@ from typing import Any
 
 CHECK_ID_RE = re.compile(r"^[a-z][a-z0-9.-]{0,63}$")
 VALID_PROJECT_MODES = {"off", "observe", "advise", "guard"}
+# A config is a short file. A larger file is not a valid config.
+MAX_CONFIG_BYTES = 262_144
+# Symbolic links are followed, as before. The open never waits, so a named
+# pipe at the config path returns at once.
+_OPEN_FLAGS = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
 
 
 class ConfigMissing(ValueError):
@@ -53,12 +60,16 @@ class ProjectConfig:
 def load_project_config(root: str | Path = ".") -> ProjectConfig:
     project_root = Path(root).expanduser().resolve()
     path = project_root / "agent-efficiency.toml"
+    text = _read_config_text(path)
     try:
-        raw = tomllib.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, NotADirectoryError) as exc:
-        raise ConfigMissing(f"verification config not found: {path}") from exc
-    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raw = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
         raise ValueError(f"invalid verification config: {exc}") from exc
+    except (RecursionError, MemoryError) as exc:
+        # Deep nesting can exhaust the parser. The file is not a valid config.
+        raise ValueError(
+            "invalid verification config: it is nested too deeply"
+        ) from exc
     if set(raw) - {"version", "mode", "checks"}:
         raise ValueError("verification config has unknown top-level fields")
     if raw.get("version") != 1:
@@ -85,6 +96,47 @@ def load_project_config(root: str | Path = ".") -> ProjectConfig:
         checks=tuple(checks),
         digest=_digest(canonical),
     )
+
+
+def _read_config_text(path: Path) -> str:
+    """Return the config text, or raise when the file cannot be a config.
+
+    The open does not wait, so a named pipe cannot stall a hook. Only a regular
+    file of at most ``MAX_CONFIG_BYTES`` is read. A missing file raises
+    ``ConfigMissing``; any other problem raises a plain ``ValueError`` whose
+    message holds no file content.
+    """
+
+    try:
+        descriptor = os.open(path, _OPEN_FLAGS)
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        raise ConfigMissing(f"verification config not found: {path}") from exc
+    except OSError as exc:
+        raise ValueError("invalid verification config: it cannot be read") from exc
+    chunks: list[bytes] = []
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise ValueError("invalid verification config: it is not a regular file")
+        remaining = MAX_CONFIG_BYTES + 1
+        while remaining > 0:
+            chunk = os.read(descriptor, min(remaining, 65_536))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+    except OSError as exc:
+        raise ValueError("invalid verification config: it cannot be read") from exc
+    finally:
+        os.close(descriptor)
+    data = b"".join(chunks)
+    if len(data) > MAX_CONFIG_BYTES:
+        raise ValueError(
+            f"invalid verification config: it is larger than {MAX_CONFIG_BYTES} bytes"
+        )
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("invalid verification config: it is not UTF-8 text") from exc
 
 
 def _parse_check(value: Any, seen: set[str]) -> CheckDefinition:
