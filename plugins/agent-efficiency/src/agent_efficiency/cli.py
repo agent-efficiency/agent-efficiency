@@ -1569,6 +1569,12 @@ def _digest_key_status(root: Path) -> dict[str, Any]:
     state = read_key(root).state
     if state == VALID:
         message = f"{path} is valid"
+    elif state == MISSING and not os.access(root, os.W_OK):
+        message = (
+            f"{path} does not exist and cannot be created, because {root} is "
+            "not writable. Fingerprints use the built-in key until the folder "
+            "is writable."
+        )
     elif state == MISSING:
         message = f"{path} does not exist yet; the first hook event creates it"
     else:
