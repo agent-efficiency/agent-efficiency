@@ -84,6 +84,11 @@ the pinned one, is not a valid config, or is not in the working directory,
 guard stays on. When the agent stops after a code change, it is asked once
 per turn, in fixed text, to tell the user. The agent cannot accept a changed
 file; the user accepts it by typing `$agent-efficiency guard` in the session.
+While the file still sets guard, or is not a valid config,
+`$agent-efficiency advise` and `$agent-efficiency on` do not accept it: guard
+stays on, the pin is kept, and the reply says why. `$agent-efficiency
+observe` and `$agent-efficiency off` turn guard off for the session and keep
+the pin.
 A file that exists but is not a valid config turns guard on. A file larger
 than 256 KiB, or one that is not a regular file (such as a folder or a named
 pipe), is not a valid config. The pin lasts for one session.

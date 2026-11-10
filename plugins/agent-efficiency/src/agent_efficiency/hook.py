@@ -82,6 +82,19 @@ GUARD_CONFIG_MESSAGES = {
         "mode for this session."
     ),
 }
+# Fixed replies to the on and advise controls when guard stays on.
+GUARD_STAYS_MESSAGES = {
+    GUARD_CONFIG_CHANGED: (
+        "Agent Efficiency stays in guard for this session. agent-efficiency.toml "
+        "differs from the one this session pinned and still sets guard. To "
+        "accept the changed file, type $agent-efficiency guard. To undo the "
+        "change, restore the file."
+    ),
+    GUARD_CONFIG_UNREADABLE: (
+        "Agent Efficiency stays in guard for this session. agent-efficiency.toml "
+        "is not a valid config. Fix the file or restore it."
+    ),
+}
 GUARD_CONFIG_FACTS = {
     GUARD_CONFIG_CHANGED: "project config changed",
     GUARD_CONFIG_UNREADABLE: "project config unreadable",
@@ -424,6 +437,34 @@ def _guard_status(
     return "advise", None, config
 
 
+def _pin_kept_by_control(
+    store: Store, session_id: str, payload: dict[str, Any]
+) -> tuple[dict[str, Any], str | None]:
+    """Return the session's mode and pin, and whether a mode control keeps it.
+
+    The pin is kept when the project config sets guard with a digest other
+    than the pin, or exists and is not a valid config. The second value is the
+    guard state that keeps it, or None.
+    """
+
+    session = store.get_session(session_id) or {}
+    pinned = {
+        "mode": session.get("mode"),
+        "pin": session.get("guard_policy_digest") or None,
+    }
+    if not pinned["pin"]:
+        return pinned, None
+    try:
+        config = load_project_config(str(payload.get("cwd") or Path.cwd()))
+    except ConfigMissing:
+        return pinned, None
+    except ValueError:
+        return pinned, GUARD_CONFIG_UNREADABLE
+    if config.mode == "guard" and config.digest != pinned["pin"]:
+        return pinned, GUARD_CONFIG_CHANGED
+    return pinned, None
+
+
 def model_name(value: Any) -> str | None:
     if isinstance(value, str):
         return value
@@ -464,6 +505,25 @@ def _on_prompt(
                         "agent-efficiency.toml for this repository.",
                     )
                 guard_policy_digest = guard_config.digest
+            else:
+                pinned, kept = _pin_kept_by_control(store, session_id, payload)
+                if kept and control in {"on", "advise"}:
+                    # The current file is not the pinned one, so leaving guard
+                    # here would let the next event pin it. Guard stays on.
+                    invalidated = False
+                    if pinned["mode"] in {"off", "observe"}:
+                        invalidated = store.set_mode(
+                            session_id, "advise", guard_policy_digest=pinned["pin"]
+                        )
+                    suffix = (
+                        " The enrolled experiment session is now invalidated."
+                        if invalidated
+                        else ""
+                    )
+                    return _control_output(host, GUARD_STAYS_MESSAGES[kept] + suffix)
+                if kept:
+                    # Observe and off leave guard; the pin survives for later.
+                    guard_policy_digest = pinned["pin"]
             if selected in {"off", "observe"}:
                 active_turn = store.latest_turn_key(session_id)
                 if active_turn:
