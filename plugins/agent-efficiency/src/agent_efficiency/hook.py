@@ -19,6 +19,7 @@ from agent_efficiency.capability_retrieval import (
     select_capability,
 )
 from agent_efficiency.contracts.effects import CanonicalEffect
+from agent_efficiency.digests import load_key
 from agent_efficiency.folder_lock import FolderBusy
 from agent_efficiency.host_data import CopyPending, hook_deadline, settle_data_dir
 from agent_efficiency.interventions import render_intervention
@@ -294,11 +295,35 @@ def _run_hook(
             return {"additional_context": CURSOR_SESSION_CONTEXT}
         return None
     if event == "PreToolUse":
-        return _on_pre_tool(payload, active_store, session_id, turn_key, host, mode)
+        return _on_pre_tool(
+            payload,
+            active_store,
+            session_id,
+            turn_key,
+            host,
+            mode,
+            key=load_key(active_store.paths.root),
+        )
     if event == "PostToolBatch":
-        return _on_post_batch(payload, active_store, session_id, turn_key, host, mode)
+        return _on_post_batch(
+            payload,
+            active_store,
+            session_id,
+            turn_key,
+            host,
+            mode,
+            key=load_key(active_store.paths.root),
+        )
     if event in {"PostToolUse", "PostToolUseFailure"}:
-        output = _on_post_tool(payload, active_store, session_id, turn_key, host, mode)
+        output = _on_post_tool(
+            payload,
+            active_store,
+            session_id,
+            turn_key,
+            host,
+            mode,
+            key=load_key(active_store.paths.root),
+        )
         if host == "cursor" and event == "PostToolUse":
             output = _merge_cursor_context(
                 output, _deferred_vault(active_store, session_id, cwd, mode)
@@ -637,6 +662,8 @@ def _on_pre_tool(
     turn_key: str,
     host: str,
     mode: str,
+    *,
+    key: bytes,
 ) -> dict[str, Any] | None:
     store.start_turn(
         session_id,
@@ -646,7 +673,7 @@ def _on_pre_tool(
         risk="normal",
     )
     tool_name = str(payload.get("tool_name") or "unknown")
-    facts = classify_tool(tool_name, payload.get("tool_input"))
+    facts = classify_tool(tool_name, payload.get("tool_input"), key=key)
     store.record_event(
         session_id,
         turn_key,
@@ -731,10 +758,12 @@ def _on_post_tool(
     turn_key: str,
     host: str,
     mode: str,
+    *,
+    key: bytes,
 ) -> dict[str, Any] | None:
     event = str(payload.get("hook_event_name"))
     tool_name = str(payload.get("tool_name") or "unknown")
-    facts = classify_tool(tool_name, payload.get("tool_input"))
+    facts = classify_tool(tool_name, payload.get("tool_input"), key=key)
     failed = event == "PostToolUseFailure" or _response_failed(payload)
     duration = payload.get("duration_ms")
     duration_ms = int(duration) if isinstance(duration, (int, float)) else None
@@ -805,6 +834,8 @@ def _on_post_batch(
     turn_key: str,
     host: str,
     mode: str,
+    *,
+    key: bytes,
 ) -> dict[str, Any] | None:
     calls = payload.get("tool_calls")
     if not isinstance(calls, list):
@@ -814,7 +845,7 @@ def _on_post_batch(
         if not isinstance(call, dict):
             continue
         tool_name = str(call.get("tool_name") or "unknown")
-        facts = classify_tool(tool_name, call.get("tool_input"))
+        facts = classify_tool(tool_name, call.get("tool_input"), key=key)
         failed = _batch_response_failed(call.get("tool_response"))
         counts = store.record_tool_event(
             session_id,

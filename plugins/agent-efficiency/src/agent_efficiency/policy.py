@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from datetime import UTC, datetime
@@ -13,6 +12,7 @@ from agent_efficiency.capability_pack import (
     capability_pack_policies,
     load_bundled_capability_pack,
 )
+from agent_efficiency.digests import CALL_LABEL, keyed_digest
 from agent_efficiency.models import Nudge, TaskFacts, ToolFacts
 from agent_efficiency.paths import RuntimePaths, bundled_file
 
@@ -227,7 +227,13 @@ def classify_task(prompt: str) -> TaskFacts:
     )
 
 
-def classify_tool(tool_name: str, tool_input: Any) -> ToolFacts:
+def classify_tool(tool_name: str, tool_input: Any, *, key: bytes) -> ToolFacts:
+    """Reduce one tool call to safe facts and a keyed call fingerprint.
+
+    ``key`` is the digest key from the data folder. Passing it in keeps this
+    function free of file access.
+    """
+
     safe_input = tool_input if isinstance(tool_input, dict) else {}
     lowered_name = tool_name.casefold()
     command = _command_text(safe_input) if _is_shell_tool(lowered_name) else ""
@@ -245,21 +251,14 @@ def classify_tool(tool_name: str, tool_input: Any) -> ToolFacts:
     is_code_edit = is_edit and (
         not extensions or bool(set(extensions) & CODE_EXTENSIONS)
     )
-    is_subagent = (
-        lowered_name in {"agent", "spawn_agent", "task", "subagent"}
-        or "spawn_agent" in lowered_name
-        or "subagent" in lowered_name
-    )
+    is_subagent = _is_subagent_tool(lowered_name)
     broad_scan = _is_broad_scan(command, lowered_name, safe_input)
-    signature_payload = json.dumps(
-        {"tool": tool_name, "input": safe_input},
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
+    signature = _call_signature(
+        tool_name,
+        safe_input,
+        key=key,
+        drop_description=_is_shell_tool(lowered_name) or is_subagent,
     )
-    signature = hashlib.sha256(
-        ("agent-efficiency-v1:" + signature_payload).encode("utf-8")
-    ).hexdigest()[:20]
     is_validation = command_class in {"test", "lint", "typecheck", "build", "check"}
     return ToolFacts(
         tool_name=tool_name,
@@ -275,6 +274,39 @@ def classify_tool(tool_name: str, tool_input: Any) -> ToolFacts:
             "extensions": list(extensions),
             "broad_scan": broad_scan,
         },
+    )
+
+
+def _call_signature(
+    tool_name: str, tool_input: dict[str, Any], *, key: bytes, drop_description: bool
+) -> str:
+    """Fingerprint a call by its tool and input, keyed so it cannot be guessed.
+
+    A shell or subagent call carries a free-text ``description`` that the
+    agent rewrites between runs of the same command. It is left out for those
+    tools, so the same command counts as a repeat. Other tools keep their
+    whole input, because there ``description`` can be a real parameter.
+    """
+
+    fingerprinted = (
+        {name: value for name, value in tool_input.items() if name != "description"}
+        if drop_description
+        else tool_input
+    )
+    payload = json.dumps(
+        {"tool": tool_name, "input": fingerprinted},
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return keyed_digest(key, CALL_LABEL, payload.encode("utf-8"))[:32]
+
+
+def _is_subagent_tool(lowered_name: str) -> bool:
+    return (
+        lowered_name in {"agent", "spawn_agent", "task", "subagent"}
+        or "spawn_agent" in lowered_name
+        or "subagent" in lowered_name
     )
 
 

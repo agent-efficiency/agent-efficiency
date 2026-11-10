@@ -7,7 +7,9 @@ from contextlib import closing
 from itertools import permutations
 from pathlib import Path
 
+from agent_efficiency.digests import load_key, read_key
 from agent_efficiency.hook import run_hook
+from agent_efficiency.policy import classify_tool
 from agent_efficiency.store import SCHEMA_VERSION, Store
 
 
@@ -493,3 +495,63 @@ class HookCallCountingTests(unittest.TestCase):
             )
         self.assertEqual(self.session()["tool_count"], 1)
         self.assertEqual(self.session()["failure_count"], 1)
+
+    def described(self, description: str) -> dict[str, str]:
+        return {**SEARCH, "description": description}
+
+    def signatures(self) -> set[str]:
+        with closing(sqlite3.connect(self.store.paths.database)) as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT signature FROM events WHERE tool_name = 'Bash'"
+            ).fetchall()
+        return {str(row[0]) for row in rows}
+
+    def resolved_reports(self) -> int:
+        with closing(sqlite3.connect(self.store.paths.database)) as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM events WHERE resolves = 1"
+            ).fetchone()
+        return int(row[0])
+
+    def test_new_descriptions_count_as_calls_of_one_signature(self) -> None:
+        self.call(self.described("Find the needle"))
+        self.call(self.described("Search again for the needle"))
+        self.assertEqual(self.session()["tool_count"], 2)
+        self.assertEqual(len(self.signatures()), 1)
+        self.assertEqual(self.resolved_reports(), 2)
+
+    def test_third_run_with_a_new_description_gets_the_repeat_nudge(self) -> None:
+        first = self.call(self.described("one"))
+        second = self.call(self.described("two"))
+        third = self.call(self.described("three"))
+        self.assertEqual(self.mentions(first + second, "same action"), 0)
+        self.assertEqual(self.mentions(third, "same action"), 1)
+        self.assertEqual(self.session()["repeated_action_count"], 1)
+
+    def test_parallel_described_calls_each_resolve_once(self) -> None:
+        inputs = [self.described("one"), self.described("two")]
+        for tool_input in inputs:
+            self.hook("PreToolUse", tool_name="Bash", tool_input=tool_input)
+        for tool_input in inputs:
+            self.hook(
+                "PostToolUse",
+                tool_name="Bash",
+                tool_input=tool_input,
+                tool_response={"stdout": "match"},
+            )
+        self.hook(
+            "PostToolBatch",
+            tool_calls=[
+                {"tool_name": "Bash", "tool_input": item, "tool_response": "match"}
+                for item in inputs
+            ],
+        )
+        self.assertEqual(self.session()["tool_count"], 2)
+        self.assertEqual(self.resolved_reports(), 2)
+
+    def test_the_hook_keys_signatures_with_the_data_folder_key(self) -> None:
+        self.call(SEARCH)
+        key = load_key(self.store.paths.root)
+        self.assertEqual(read_key(self.store.paths.root).state, "valid")
+        expected = classify_tool("Bash", SEARCH, key=key).signature
+        self.assertEqual(self.signatures(), {expected})
