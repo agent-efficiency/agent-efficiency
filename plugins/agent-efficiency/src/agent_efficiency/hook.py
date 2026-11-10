@@ -23,7 +23,11 @@ from agent_efficiency.folder_lock import FolderBusy
 from agent_efficiency.host_data import CopyPending, hook_deadline, settle_data_dir
 from agent_efficiency.interventions import render_intervention
 from agent_efficiency.models import Nudge
-from agent_efficiency.verification.config import load_project_config
+from agent_efficiency.verification.config import (
+    ConfigMissing,
+    ProjectConfig,
+    load_project_config,
+)
 from agent_efficiency.verification.receipts import receipt_state
 from agent_efficiency.verification.state import workspace_state
 from agent_efficiency.policy import PolicyPack, classify_task, classify_tool
@@ -49,6 +53,9 @@ CURSOR_SESSION_CONTEXT = (
 # a hook event can see that no vault is registered without importing the vault
 # modules.
 VAULT_CONFIG_NAME = "vault.json"
+GUARD_CONFIG_CHANGED = "config-changed"
+GUARD_CONFIG_UNREADABLE = "config-unreadable"
+GUARD_CONFIG_MISSING = "config-missing"
 VAULT_REQUEST_MESSAGES = {
     "no_trees": (
         "No vault tree is registered. Run agent-efficiency vault register "
@@ -179,15 +186,15 @@ def _run_hook(
                 )
             except (OSError, ValueError):
                 session_capability = None
-    mode = _effective_mode(str(session.get("mode") or active_store.default_mode()), cwd)
-    if mode == "guard":
-        try:
-            guard_config = load_project_config(cwd)
-            if session.get("guard_policy_digest") != guard_config.digest:
-                active_store.set_guard_policy_digest(session_id, guard_config.digest)
-                session["guard_policy_digest"] = guard_config.digest
-        except ValueError:
-            mode = "advise"
+    pinned = session.get("guard_policy_digest") or None
+    mode, guard_state, guard_config = _guard_status(
+        str(session.get("mode") or active_store.default_mode()), cwd, pinned
+    )
+    if mode == "guard" and guard_state is None and guard_config and not pinned:
+        # The first guard event of a session pins the config it found. A later
+        # change is never pinned here; only the user's guard control accepts it.
+        active_store.set_guard_policy_digest(session_id, guard_config.digest)
+        session["guard_policy_digest"] = guard_config.digest
 
     if event == "UserPromptSubmit":
         if mode != "off":
@@ -324,14 +331,33 @@ def normalize_payload(payload: dict[str, Any], *, host: str) -> dict[str, Any]:
     return adapter_for(host).normalize_payload(payload)
 
 
-def _effective_mode(session_mode: str, cwd: str) -> str:
+def _guard_status(
+    session_mode: str, cwd: str, pinned: str | None
+) -> tuple[str, str | None, ProjectConfig | None]:
+    """Return the effective mode, a degraded guard state, and the loaded config.
+
+    A session in advise or guard runs in guard when the project config asks
+    for it. After a session pins a config, a config that is changed, removed,
+    or broken keeps guard on in a degraded state; it never drops the session
+    to advise. A config file that exists but does not load is read as a
+    request for guard, pinned or not.
+    """
+
     if session_mode not in {"advise", "guard"}:
-        return session_mode
+        return session_mode, None, None
     try:
-        project_guard = load_project_config(cwd).mode == "guard"
+        config = load_project_config(cwd)
+    except ConfigMissing:
+        if pinned:
+            return "guard", GUARD_CONFIG_MISSING, None
+        return "advise", None, None
     except ValueError:
-        project_guard = False
-    return "guard" if project_guard else "advise"
+        return "guard", GUARD_CONFIG_UNREADABLE, None
+    if pinned and pinned != config.digest:
+        return "guard", GUARD_CONFIG_CHANGED, config
+    if config.mode == "guard":
+        return "guard", None, config
+    return "advise", None, config
 
 
 def model_name(value: Any) -> str | None:
