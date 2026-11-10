@@ -1,5 +1,49 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Keep guard mode on when the project config changes, breaks, or is removed
+  during a session. Before, a config that failed to load turned guard into
+  advise, and a changed config was accepted without asking. Now a session
+  pins the config the first time it runs in guard. If the file later changes,
+  stops loading, or is removed, guard stays on, and when the agent stops after
+  a code change it is asked once per turn to tell you. Only you can accept the
+  change, by typing `$agent-efficiency guard` (or `$agent-efficiency advise`
+  when the file no longer sets guard) in the session. A config file that exists
+  but does not load also turns guard on in an `advise` session.
+- Count a shell or subagent call that repeats a command with a new
+  description as a repeat. The free-text description is no longer part of the
+  call fingerprint for those tools.
+
+### Added
+
+- Action fingerprints are keyed with a private key in the data folder,
+  `digest.key`, created with mode 0600 on first use and never replaced.
+  Fingerprints stored before this release keep their old form.
+- `doctor` reports the digest key and fails when the key file is not valid. It
+  never prints the key.
+- `doctor` names each Claude Code setting that sends hook or status line
+  writes to a data folder other than its own, with the setting to change, and
+  fails while the store is split. It reads `env.AGENT_EFFICIENCY_DATA`, and
+  `--data-dir` or an `AGENT_EFFICIENCY_DATA=` prefix in `statusLine.command`,
+  from the `CLAUDE_CONFIG_DIR` folder, `~/.claude`, the project settings, and
+  each folder given with the new `--host-config` option. It never edits a
+  settings file. Codex and Cursor are reported as not checked.
+- `doctor` reports whether `git merge`, `gh`, and `agent-efficiency` need a
+  permission prompt in Claude Code for the folder it checks: allow, ask, deny,
+  or not set, with the rules and files that decide it. This report does not
+  change the doctor result.
+
+### Known limits
+
+- Accepting a changed config lasts for the current session. A new session pins
+  the file it finds.
+- `agent-efficiency mode guard` in a terminal also pins the current file, and
+  an agent with shell access can run it. The permission report shows whether
+  Claude Code asks before it runs `agent-efficiency`.
+
 ## 0.2.2 - 2026-11-06
 
 See the [release notes](docs/releases/0.2.2.md) and the schema 8 upgrade

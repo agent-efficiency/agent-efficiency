@@ -30,6 +30,7 @@ One data folder serves the terminal command and every host:
 | `vault.json` | The list of registered vault trees, by path. |
 | `knowledge/` | The guidance pack that sessions pin. |
 | `.plugin-data-copy.lock`, `plugin-data-copy.json` | A lock file, and a record of a store copied in from an earlier release. |
+| `digest.key` | The private key for action fingerprints. Created with mode 0600 on first use, and never replaced or deleted. |
 
 ## Who can read it
 
@@ -53,7 +54,8 @@ chmod -R go-rwx ~/.local/share/agent-efficiency
 - project folder names and one-way project keys;
 - host and model names;
 - event times and fixed event classes;
-- one-way fingerprints of actions;
+- one-way fingerprints of actions, keyed with `digest.key`; the free-text
+  description of a shell or subagent call is not part of them;
 - counts and durations;
 - verification receipts: check ids, results, reason codes, commit ids, and
   digests;

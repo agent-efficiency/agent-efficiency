@@ -29,7 +29,9 @@ The lifecycle path:
 - reads vault trees only from local files and never writes to them;
 - treats monitoring errors as non-blocking;
 - caps and deduplicates guidance;
-- requires project consent before guard behavior.
+- requires project consent before guard behavior;
+- keeps guard on when the project config changes, stops loading, or is
+  removed during a session.
 
 Project-defined verification commands are explicit argument arrays. They are
 not passed through a shell.
@@ -41,7 +43,7 @@ The local SQLite database can contain:
 - project basenames and one-way project keys;
 - host and model names;
 - event times and controlled event classes;
-- action fingerprints;
+- action fingerprints, keyed with a private local key;
 - counts and durations;
 - verification receipt digests;
 - structured experiment labels and outcomes;
@@ -62,11 +64,41 @@ It does not contain:
 - vault note text, note ids, titles, hooks, vault paths, remotes, or branches.
 
 The runtime data directory also holds `vault.json`, the list of registered
-vault tree paths. Vault note text goes only to the host session that receives
+vault tree paths, and `digest.key`, the private key for action fingerprints.
+The key is created with mode 0600 on first use. Agent Efficiency never
+replaces, repairs, or deletes it. When it is missing and cannot be created,
+or is not a private regular file in the expected form, fingerprints use a
+fixed built-in key and are as easy to guess as an unkeyed hash; `doctor`
+reports this. Vault note text goes only to the host session that receives
 it.
 
 Operational metadata can still be sensitive. Protect the database with normal
 developer filesystem permissions. Do not commit it.
+
+## Guard mode and the project config
+
+A session that runs in guard pins the digest of the project's
+`agent-efficiency.toml` the first time. If the file later changes, stops
+loading, or is removed, guard stays on. When the agent stops after a code
+change, it is asked once per turn, in fixed text, to tell the user. The
+agent cannot accept the change; the user accepts it by typing
+`$agent-efficiency guard` in the session. A file that exists but does not
+load turns guard on. The pin lasts for one session.
+
+The terminal command `agent-efficiency mode guard` also pins the current
+file. An agent with shell access can run it, as it can edit the database:
+the store resists mistakes, not deliberate tampering by an agent with shell
+access. `doctor` reports whether Claude Code asks before it runs
+`agent-efficiency`, `git merge`, and `gh` in a folder, so the choice is
+visible. It never changes those settings.
+
+## Host settings
+
+`doctor` reads Claude Code settings files to find a split data folder and
+to report permission rules. It treats them as untrusted input: it reads at
+most 1 MiB of each, does not follow a link out of the settings folder, and
+reports a file it cannot parse as one that could not be read. It never
+edits them.
 
 ## Guidance integrity
 

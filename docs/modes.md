@@ -107,3 +107,24 @@ continues the same turn.
 
 A project whose file says `mode = "guard"` turns `advise` into `guard` for
 sessions in that project. `observe` and `off` stay as they are.
+
+### When the config changes during a session
+
+The first guard event of a session pins the digest of `agent-efficiency.toml`.
+After that, guard stays on for the rest of the session in each of these cases:
+
+| The file | What guard does |
+| --- | --- |
+| changed, including a change to `mode = "advise"` | When the agent stops after a code change, it is asked once per turn to tell you. Required checks wait until the change is accepted or undone. |
+| exists but is not a valid config | The same. This also turns guard on in an `advise` session. |
+| removed | The same. |
+
+The agent cannot accept a changed file. To accept it, type
+`$agent-efficiency guard` in the session, or `$agent-efficiency advise` if the
+file no longer sets guard. After the file was removed, type
+`$agent-efficiency advise` to leave guard. Restoring the file also ends the
+state. The pin lasts for one session: a new session pins the file it finds.
+
+`agent-efficiency mode guard` in a terminal pins the current file too. An agent
+with shell access can run it. `agent-efficiency doctor` shows whether Claude
+Code asks before it runs `agent-efficiency` in the project.

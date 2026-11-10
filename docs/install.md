@@ -137,7 +137,8 @@ The command and the plugin share one data folder,
 `~/.local/share/agent-efficiency` (or `$XDG_DATA_HOME/agent-efficiency`). So a
 mode you set or a vault you register in the terminal reaches your sessions.
 Set `AGENT_EFFICIENCY_DATA` or pass `--data-dir` to use another folder; set it
-the same way for the host, or the two will not share data.
+the same way for the host, or the two will not share data. `agent-efficiency
+doctor` names any Claude Code setting that points somewhere else.
 
 Inside a Claude Code session, the agent can run the plugin's own copy of the
 command, because Claude Code puts the plugin's `bin` folder on the PATH of the
