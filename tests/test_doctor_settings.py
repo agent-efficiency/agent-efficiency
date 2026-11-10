@@ -442,6 +442,17 @@ class PermissionRuleTests(unittest.TestCase):
             with self.subTest(rule=rule):
                 self.assertIsNone(interpret_rule(rule))
 
+    def test_rules_with_other_whitespace_are_not_guessed(self) -> None:
+        for rule in (
+            "Bash(git\tmerge:*)",
+            "Bash(git\nmerge:*)",
+            "Bash(git  merge:*)",
+            "Bash(gh\t*)",
+            "Bash(git merge\u00a0*)",
+        ):
+            with self.subTest(rule=rule):
+                self.assertEqual(interpret_rule(rule), ("unknown", ""))
+
     def test_rules_this_reader_cannot_read_are_not_guessed(self) -> None:
         for rule in ("Bash(git -C * merge *)", "Bash()", "Bash(git merge", "Bashful"):
             with self.subTest(rule=rule):
@@ -619,6 +630,18 @@ class PermissionReportTests(DoctorCase):
         assert isinstance(text, str)
         self.assertFalse("a" * 201 in text, "the long value was not cut")
         self.assertIn("[cut", text)
+
+    def test_the_report_says_which_tool_commands_it_checks(self) -> None:
+        self.settings(
+            self.home / ".claude" / "settings.json", allow=["Bash(python3:*)"]
+        )
+        _, doctor = self.doctor()
+        assert isinstance(doctor, dict)
+        note = doctor["permission_settings"]["tool_command_check"]
+        self.assertIn("bare command name agent-efficiency", note)
+        self.assertIn("not evaluated", note)
+        _, text = self.doctor(text=True)
+        self.assertIn(f"  note: {note}", text)
 
     def test_text_output_lists_each_action(self) -> None:
         self.settings(self.home / ".claude" / "settings.json", ask=["Bash(gh *)"])

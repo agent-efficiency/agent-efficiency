@@ -1901,6 +1901,7 @@ def _format_permission_settings(value: dict[str, Any]) -> list[str]:
             for item in profile["files"]
             if item["status"] != "read"
         )
+    lines.append(f"  note: {value['tool_command_check']}")
     lines.extend(
         f"  {HOST_NAMES.get(name, name)}: {text}"
         for name, text in value["not_checked"].items()
