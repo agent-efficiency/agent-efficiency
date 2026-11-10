@@ -142,6 +142,21 @@ class KeyFileTests(unittest.TestCase):
         self.assertEqual(load_key(self.root), FALLBACK_KEY)
         self.assertEqual(read_key(self.root).state, "missing")
 
+    def test_without_owner_checks_the_key_is_still_created_and_read(self) -> None:
+        # Some systems have no effective user id, so there is no owner to check.
+        saved = os.geteuid
+        del os.geteuid
+        self.addCleanup(setattr, os, "geteuid", saved)
+        key = load_key(self.root)
+        self.assertNotEqual(key, FALLBACK_KEY)
+        self.assertEqual(load_key(self.root), key)
+        found = read_key(self.root)
+        self.assertEqual((found.key, found.state), (key, "valid"))
+
+    def test_any_failure_while_loading_gives_the_fallback_key(self) -> None:
+        with mock.patch.object(digests, "read_key", side_effect=RuntimeError):
+            self.assertEqual(load_key(self.root), FALLBACK_KEY)
+
     def test_the_process_that_loses_a_creation_race_keeps_the_winner(self) -> None:
         self.write_key()
         digests._create_key(self.root)
