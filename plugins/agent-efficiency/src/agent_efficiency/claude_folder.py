@@ -237,7 +237,8 @@ def is_trusted(folder: Path, repository: Path | None, trust_file: Path) -> bool:
         return False
     try:
         document = json.loads(data.decode("utf-8"))
-    except ValueError:
+    except (ValueError, RecursionError):
+        # Deep nesting can exhaust the parser; trust is then not known.
         return False
     projects = document.get("projects") if isinstance(document, dict) else None
     if not isinstance(projects, dict):
