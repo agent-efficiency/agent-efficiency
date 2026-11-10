@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from agent_efficiency.claude_folder import is_trusted
 from agent_efficiency.cli import _digest_key_status, main
 from agent_efficiency.permission_report import coverage, interpret_rule
 from agent_efficiency.paths import PLUGIN_ROOT
@@ -368,6 +369,11 @@ class HostileSettingsTests(DoctorCase):
                 self.assertEqual(len(report["problems"]), 1)
                 self.assertEqual(report["problems"][0]["file"], str(path))
                 self.assertIn("not checked", report["problems"][0]["status"])
+
+    def test_a_deeply_nested_trust_file_means_trust_is_not_known(self) -> None:
+        trust_file = self.home / ".claude.json"
+        trust_file.write_text("[" * 200_000 + "]" * 200_000, encoding="utf-8")
+        self.assertFalse(is_trusted(self.project, None, trust_file))
 
     @unittest.skipUnless(hasattr(os, "mkfifo"), "needs named pipes")
     def test_a_named_pipe_as_the_trust_file_does_not_stall_doctor(self) -> None:
