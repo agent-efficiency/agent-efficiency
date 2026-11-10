@@ -32,7 +32,7 @@ Claude Code with more than one config folder, name each extra one with
 | `doctor` says other users can access the data folder or files in it. | The folder existed before Agent Efficiency, or a file was made readable. | Run the `chmod -R go-rwx` command it prints. |
 | `doctor` fails on `data_dir_settings`. | A Claude Code setting sends hook or status line writes to another data folder, so cost and hook events land in two stores. | Change each setting a `fix:` line names. See [Split data folder](#split-data-folder). |
 | `doctor` fails on `digest_key`. | `digest.key` is not a private regular file holding 64 hex characters. | Move it aside, for example to `digest.key.bad`. The next hook event creates a new key. |
-| Guard keeps asking the agent to tell you about `agent-efficiency.toml`. | The file changed, stopped loading, or was removed during the session. | Type `$agent-efficiency guard` to accept the current file, or restore it. See [Modes](modes.md#when-the-config-changes-during-a-session). |
+| Guard keeps asking the agent to tell you about `agent-efficiency.toml`. | The file differs from the one the session pinned, is not a valid config, or is not in the agent's working directory. | If it differs: type `$agent-efficiency guard` to accept it, or `$agent-efficiency advise` if it no longer sets guard, or restore it. If it is not valid: fix or restore it. If it is not found: return the agent to the project folder, restore the file, or type `$agent-efficiency advise` to leave guard. See [Modes](modes.md#when-the-config-changes-during-a-session). |
 
 ## Plugin disabled in a folder
 
@@ -110,7 +110,13 @@ name it, and run `doctor` with the same folder (`--data-dir` or
 `git merge`, `gh`, and `agent-efficiency` are allowed, asked, denied, or not
 set in the project, with the rule and file that decide it. It is there so
 you can see the choice; it does not change the doctor result or any file. A
-rule it cannot read is listed as not interpreted.
+rule it cannot read, or one whose command holds a tab, a newline, or a run of
+spaces, is listed as not interpreted.
+
+For `agent-efficiency`, the report matches only the bare command name. A rule
+that allows an interpreter or a full path, such as `Bash(python3:*)`, can also
+run the tool, and the report does not evaluate it. The `note:` line in the
+report says so. Managed settings and command-line options are not checked.
 
 ## Still stuck
 
