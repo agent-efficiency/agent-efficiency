@@ -1096,6 +1096,12 @@ class Store:
         *,
         guard_policy_digest: str | None = None,
     ) -> bool:
+        """Set the session mode and its guard pin.
+
+        The pin is stored as given, for any mode, so a caller can keep a pin
+        while guard is off. Passing no digest clears it.
+        """
+
         if mode not in VALID_MODES:
             raise ValueError(f"invalid mode: {mode}")
         self.ensure_current_schema()
@@ -1114,12 +1120,7 @@ class Store:
             conn.execute(
                 "UPDATE sessions SET mode = ?, guard_policy_digest = ?, "
                 "updated_at = ? WHERE session_id = ?",
-                (
-                    mode,
-                    guard_policy_digest if mode == "guard" else None,
-                    now,
-                    session_id,
-                ),
+                (mode, guard_policy_digest, now, session_id),
             )
         return invalidation.rowcount > 0
 

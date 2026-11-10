@@ -12,8 +12,11 @@
   directory, guard stays on, and when the agent stops after a code change it
   is asked once per turn to tell you. Only you can accept a changed file, by
   typing `$agent-efficiency guard` (or `$agent-efficiency advise` when the
-  file no longer sets guard) in the session. A config file that exists but
-  does not load also turns guard on in an `advise` session.
+  file no longer sets guard) in the session. While the file still sets guard,
+  or is not a valid config, `$agent-efficiency advise` and `on` keep guard on
+  and say why, and `observe` and `off` turn guard off but keep the pin. A
+  config file that exists but does not load also turns guard on in an
+  `advise` session.
 - Treat a project config larger than 256 KiB, one that is not a regular file
   (such as a named pipe), or one nested too deeply to parse as not valid. The
   file is opened without waiting, so such a file can no longer stall or crash

@@ -184,6 +184,30 @@ class GuardStatusTests(unittest.TestCase):
         self.assertEqual(self.status(None), ("advise", None))
 
 
+class StorePinTests(unittest.TestCase):
+    def setUp(self) -> None:
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.store = Store(temp.name)
+        self.store.ensure_session("session-1", host="claude", cwd=temp.name)
+
+    def pin(self) -> object:
+        return self.store.get_session("session-1")["guard_policy_digest"]
+
+    def test_a_digest_given_with_any_mode_is_kept(self) -> None:
+        for mode in ("off", "observe", "advise", "guard"):
+            with self.subTest(mode=mode):
+                self.store.set_mode("session-1", mode, guard_policy_digest="sha256:a")
+                self.assertEqual(self.pin(), "sha256:a")
+
+    def test_no_digest_clears_the_pin(self) -> None:
+        for mode in ("off", "observe", "advise", "guard"):
+            with self.subTest(mode=mode):
+                self.store.set_guard_policy_digest("session-1", "sha256:a")
+                self.store.set_mode("session-1", mode)
+                self.assertIsNone(self.pin())
+
+
 class GuardSessionCase(unittest.TestCase):
     """A git project whose config asks for guard, and one Claude Code session."""
 
@@ -195,6 +219,7 @@ class GuardSessionCase(unittest.TestCase):
         self.root = Path(self.project_temp.name)
         self.config = self.root / "agent-efficiency.toml"
         self.store = Store(self.data_temp.name)
+        self.session_id = "session-1"
         (self.root / "app.py").write_text("value = 1\n")
         self.config.write_text(guard_config())
         for arguments in (
@@ -208,7 +233,7 @@ class GuardSessionCase(unittest.TestCase):
     def hook(self, event: str, turn: str = "turn-1", **extra: object) -> object:
         return run_hook(
             {
-                "session_id": "session-1",
+                "session_id": self.session_id,
                 "cwd": str(self.root),
                 "prompt_id": turn,
                 "hook_event_name": event,
@@ -222,7 +247,10 @@ class GuardSessionCase(unittest.TestCase):
         return self.hook("UserPromptSubmit", turn, prompt=text)
 
     def pin(self) -> object:
-        return self.store.get_session("session-1")["guard_policy_digest"]
+        return self.store.get_session(self.session_id)["guard_policy_digest"]
+
+    def stored_mode(self) -> object:
+        return self.store.get_session(self.session_id)["mode"]
 
 
 class GuardSessionTests(GuardSessionCase):
@@ -365,6 +393,93 @@ class GuardStopTests(GuardSessionCase):
         output = self.edit_and_stop(turn="turn-2")
         self.assertNotIn("agent-efficiency.toml", repr(output))
         self.assertNotIn("guard.config-changed", self.policy_ids())
+
+    def control(self, name: str, turn: str) -> str:
+        output = self.prompt(f"$agent-efficiency {name}", turn=turn)
+        assert isinstance(output, dict)
+        self.assertNotIn(MARKER, repr(output))
+        return str(output["stopReason"])
+
+    def test_the_advise_control_keeps_the_pin_for_a_changed_guard_file(self) -> None:
+        self.start()
+        first = self.pin()
+        changed = guard_config().replace('["**/*.py"]', '["nothing/**"]')
+        self.config.write_text(changed.replace("unit", MARKER))
+        self.assert_blocked(
+            self.edit_and_stop(), "guard.config-changed", "differs from the one"
+        )
+        reply = self.control("advise", "turn-2")
+        self.assertIn("stays in guard for this session", reply)
+        self.assertIn("still sets guard", reply)
+        self.assertIn("$agent-efficiency guard", reply)
+        self.assertEqual(self.pin(), first)
+        output = self.edit_and_stop(turn="turn-2")
+        self.assert_blocked(output, "guard.config-changed", "differs from the one")
+
+    def test_the_on_control_keeps_the_pin_for_a_changed_guard_file(self) -> None:
+        self.start()
+        first = self.pin()
+        self.config.write_text(guard_config(timeout=60))
+        self.assertIn("stays in guard", self.control("on", "turn-2"))
+        self.assertEqual(self.pin(), first)
+
+    def test_the_advise_control_keeps_guard_for_an_invalid_file(self) -> None:
+        self.start()
+        first = self.pin()
+        self.config.write_text(f"{MARKER} = [\n")
+        reply = self.control("advise", "turn-2")
+        self.assertIn("stays in guard for this session", reply)
+        self.assertIn("not a valid config", reply)
+        self.assertEqual(self.pin(), first)
+        output = self.edit_and_stop(turn="turn-2")
+        self.assert_blocked(output, "guard.config-unreadable", "not a valid config")
+
+    def test_the_advise_control_leaves_guard_after_the_file_is_removed(self) -> None:
+        self.start()
+        self.config.unlink()
+        reply = self.control("advise", "turn-2")
+        self.assertEqual(reply, "Agent Efficiency is advise for this session.")
+        self.assertIsNone(self.pin())
+        output = self.edit_and_stop(turn="turn-2")
+        self.assertNotIn("agent-efficiency.toml", repr(output))
+        self.assertNotIn("guard.config-missing", self.policy_ids())
+
+    def test_off_then_advise_returns_to_the_changed_state(self) -> None:
+        self.start()
+        first = self.pin()
+        self.config.write_text(guard_config(timeout=60))
+        reply = self.control("off", "turn-2")
+        self.assertEqual(reply, "Agent Efficiency is off for this session.")
+        self.assertEqual((self.stored_mode(), self.pin()), ("off", first))
+        self.assertIsNone(self.edit_and_stop(turn="turn-2"))
+        self.assertIn("stays in guard", self.control("advise", "turn-3"))
+        self.assertEqual((self.stored_mode(), self.pin()), ("advise", first))
+        output = self.edit_and_stop(turn="turn-3")
+        self.assert_blocked(output, "guard.config-changed", "differs from the one")
+
+    def test_observe_and_off_turn_guard_off_in_each_degraded_state(self) -> None:
+        original = self.config.read_text()
+        states = {
+            "changed": lambda: self.config.write_text(guard_config(timeout=60)),
+            "invalid": lambda: self.config.write_text(f"{MARKER} = [\n"),
+            "missing": self.config.unlink,
+        }
+        for state, degrade in states.items():
+            for control in ("observe", "off"):
+                with self.subTest(state=state, control=control):
+                    self.session_id = f"session-{state}-{control}"
+                    self.config.write_text(original)
+                    self.start()
+                    first = self.pin()
+                    degrade()
+                    reply = self.control(control, "turn-2")
+                    self.assertEqual(
+                        reply, f"Agent Efficiency is {control} for this session."
+                    )
+                    self.assertEqual(self.stored_mode(), control)
+                    kept = None if state == "missing" else first
+                    self.assertEqual(self.pin(), kept)
+                    self.assertIsNone(self.edit_and_stop(turn="turn-2"))
 
     def test_cursor_gets_one_followup_for_a_changed_config(self) -> None:
         base = {

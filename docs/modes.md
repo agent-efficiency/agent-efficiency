@@ -128,6 +128,12 @@ The agent cannot accept a changed file. To accept it, type
 file no longer sets guard. Restoring the file also ends the state. Fix or
 restore a file that is not a valid config.
 
+While the file still sets guard with other content, or is not a valid config,
+`$agent-efficiency advise` and `$agent-efficiency on` keep guard on and reply
+with the reason. `$agent-efficiency observe` and `$agent-efficiency off` turn
+guard off for the session but keep the pin, so a later `advise` or `on` is
+back in the same state.
+
 A file that differs can also mean the agent's working directory moved to
 another project. A file that is not found can mean the working directory
 moved to a subfolder; guard checks apply again once it is back in the project

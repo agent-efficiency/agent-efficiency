@@ -327,8 +327,12 @@ Guard mode is the exception only after all of these conditions hold:
 
 Guard also continues a stopped turn once after a code change when the
 project config pinned for the session has changed, no longer loads, or was
-removed. The message is fixed text. Only the user's guard control in the
-session accepts a changed config.
+removed. The message is fixed text. Only the user's controls in the session
+accept a changed config: the guard control accepts a file that still sets
+guard, and the advise control accepts a file that no longer sets guard or was
+removed. While the file still sets guard with other content, or is not a
+valid config, the advise and on controls keep guard on and keep the pin. The
+observe and off controls turn guard off and also keep the pin.
 
 ## Package layout
 
