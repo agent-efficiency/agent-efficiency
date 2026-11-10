@@ -15,6 +15,15 @@ CHECK_ID_RE = re.compile(r"^[a-z][a-z0-9.-]{0,63}$")
 VALID_PROJECT_MODES = {"off", "observe", "advise", "guard"}
 
 
+class ConfigMissing(ValueError):
+    """The project has no agent-efficiency.toml.
+
+    A missing file is the normal state of a project without a config. A file
+    that exists and does not load raises a plain ValueError instead, so guard
+    mode can tell the two apart.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class CheckDefinition:
     check_id: str
@@ -46,8 +55,8 @@ def load_project_config(root: str | Path = ".") -> ProjectConfig:
     path = project_root / "agent-efficiency.toml"
     try:
         raw = tomllib.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
-        raise ValueError(f"verification config not found: {path}") from exc
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        raise ConfigMissing(f"verification config not found: {path}") from exc
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise ValueError(f"invalid verification config: {exc}") from exc
     if set(raw) - {"version", "mode", "checks"}:
