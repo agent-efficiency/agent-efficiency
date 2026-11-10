@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 from agent_efficiency.cli import main
+from agent_efficiency.permission_report import coverage, interpret_rule
 from tests.test_doctor import isolated_home, write_json
 
 VALID_TEXT = "0123456789abcdef" * 4 + "\n"
@@ -261,3 +262,186 @@ class DataFolderSettingsTests(DoctorCase):
         self.assertEqual(code, 1)
         self.assertIn(f"sets env.AGENT_EFFICIENCY_DATA to {self.other}", text)
         self.assertIn("    fix: change env.AGENT_EFFICIENCY_DATA", text)
+
+
+class PermissionRuleTests(unittest.TestCase):
+    def covers(self, rule: str, action: str) -> str | None:
+        reading = interpret_rule(rule)
+        assert reading is not None and reading[0] != "unknown", rule
+        return coverage(*reading, action)
+
+    def test_rules_that_cover_every_form_of_an_action(self) -> None:
+        cases = (
+            ("Bash", "gh"),
+            ("Bash(*)", "gh"),
+            ("Bash(git merge:*)", "git merge"),
+            ("Bash(git merge *)", "git merge"),
+            ("Bash(git:*)", "git merge"),
+            ("Bash(git *)", "git merge"),
+            ("Bash(gh*)", "gh"),
+            ("Bash(agent-efficiency:*)", "agent-efficiency"),
+        )
+        for rule, action in cases:
+            with self.subTest(rule=rule):
+                self.assertEqual(self.covers(rule, action), "all")
+
+    def test_rules_that_cover_some_forms_of_an_action(self) -> None:
+        cases = (
+            ("Bash(gh pr view:*)", "gh"),
+            ("Bash(gh pr create *)", "gh"),
+            ("Bash(git merge)", "git merge"),
+            ("Bash(agent-efficiency check unit)", "agent-efficiency"),
+        )
+        for rule, action in cases:
+            with self.subTest(rule=rule):
+                self.assertEqual(self.covers(rule, action), "some")
+
+    def test_rules_for_other_commands_do_not_match(self) -> None:
+        cases = (
+            ("Bash(git status:*)", "git merge"),
+            ("Bash(ghost *)", "gh"),
+            ("Bash(git mergetool:*)", "git merge"),
+            ("Bash(npm test)", "agent-efficiency"),
+        )
+        for rule, action in cases:
+            with self.subTest(rule=rule):
+                self.assertIsNone(self.covers(rule, action))
+
+    def test_rules_for_other_tools_are_ignored(self) -> None:
+        for rule in ("Read", "Edit(src/**)", "WebFetch(domain:example.com)"):
+            with self.subTest(rule=rule):
+                self.assertIsNone(interpret_rule(rule))
+
+    def test_rules_this_reader_cannot_read_are_not_guessed(self) -> None:
+        for rule in ("Bash(git -C * merge *)", "Bash()", "Bash(git merge", "Bashful"):
+            with self.subTest(rule=rule):
+                self.assertEqual(interpret_rule(rule), ("unknown", ""))
+
+
+class PermissionReportTests(DoctorCase):
+    def settings(self, path: Path, **lists: list[str]) -> Path:
+        write_json(path, {"permissions": lists})
+        return path
+
+    def profile(self, *extra: str) -> tuple[int, dict]:
+        code, doctor = self.doctor(*extra)
+        assert isinstance(doctor, dict)
+        report = doctor["permission_settings"]
+        self.assertTrue(report["informational"])
+        return code, report["profiles"][0]
+
+    def test_nothing_set_is_reported_as_not_set(self) -> None:
+        code, profile = self.profile()
+        self.assertEqual(code, 0)
+        for action in ("git merge", "gh", "agent-efficiency"):
+            self.assertEqual(profile["actions"][action]["decision"], "not set")
+
+    def test_each_action_names_its_rule_and_file(self) -> None:
+        user = self.settings(
+            self.home / ".claude" / "settings.json", allow=["Bash(git merge:*)"]
+        )
+        shared = self.settings(
+            self.project / ".claude" / "settings.json", ask=["Bash(gh *)"]
+        )
+        local = self.settings(
+            self.project / ".claude" / "settings.local.json",
+            deny=["Bash(agent-efficiency:*)"],
+            allow=["Bash(agent-efficiency *)"],
+        )
+        code, profile = self.profile()
+        self.assertEqual(code, 0)
+        actions = profile["actions"]
+        self.assertEqual(actions["git merge"]["decision"], "allow")
+        self.assertEqual(
+            actions["git merge"]["rules"],
+            [
+                {
+                    "rule": "Bash(git merge:*)",
+                    "list": "allow",
+                    "file": str(user),
+                    "covers": "all",
+                }
+            ],
+        )
+        self.assertEqual(actions["gh"]["decision"], "ask")
+        self.assertEqual(actions["gh"]["rules"][0]["file"], str(shared))
+        self.assertEqual(actions["agent-efficiency"]["decision"], "deny")
+        self.assertEqual(
+            {rule["file"] for rule in actions["agent-efficiency"]["rules"]},
+            {str(local)},
+        )
+
+    def test_deny_wins_over_ask_and_ask_over_allow_across_files(self) -> None:
+        self.settings(
+            self.home / ".claude" / "settings.json",
+            allow=["Bash"],
+            ask=["Bash(gh:*)"],
+        )
+        self.settings(self.project / ".claude" / "settings.json", deny=["Bash(gh *)"])
+        _, profile = self.profile()
+        self.assertEqual(profile["actions"]["gh"]["decision"], "deny")
+        self.assertEqual(profile["actions"]["git merge"]["decision"], "allow")
+
+    def test_a_rule_for_some_forms_is_listed_but_does_not_decide(self) -> None:
+        self.settings(
+            self.home / ".claude" / "settings.json", allow=["Bash(gh pr view:*)"]
+        )
+        _, profile = self.profile()
+        self.assertEqual(profile["actions"]["gh"]["decision"], "not set")
+        self.assertEqual(profile["actions"]["gh"]["rules"][0]["covers"], "some")
+
+    def test_a_rule_it_cannot_read_is_listed_as_not_interpreted(self) -> None:
+        path = self.settings(
+            self.home / ".claude" / "settings.json", allow=["Bash(git -C * merge *)"]
+        )
+        _, profile = self.profile()
+        self.assertEqual(profile["actions"]["git merge"]["decision"], "not set")
+        self.assertEqual(
+            profile["not_interpreted"],
+            [{"rule": "Bash(git -C * merge *)", "list": "allow", "file": str(path)}],
+        )
+
+    def test_a_default_mode_is_reported(self) -> None:
+        path = self.home / ".claude" / "settings.json"
+        write_json(path, {"permissions": {"defaultMode": "acceptEdits"}})
+        _, profile = self.profile()
+        self.assertEqual(
+            profile["default_mode"], [{"file": str(path), "value": "acceptEdits"}]
+        )
+
+    def test_each_profile_is_reported_on_its_own(self) -> None:
+        other = self.home / "profile-two"
+        self.settings(other / "settings.json", deny=["Bash(git merge *)"])
+        code, doctor = self.doctor("--host-config", str(other))
+        assert isinstance(doctor, dict)
+        profiles = doctor["permission_settings"]["profiles"]
+        self.assertEqual(
+            [profile["config_folder"] for profile in profiles],
+            [str(self.home / ".claude"), str(other)],
+        )
+        self.assertEqual(
+            [p["actions"]["git merge"]["decision"] for p in profiles],
+            ["not set", "deny"],
+        )
+        self.assertEqual(code, 0)
+
+    def test_the_report_never_changes_settings_or_doctor_ok(self) -> None:
+        path = self.settings(
+            self.home / ".claude" / "settings.json", deny=["Bash(agent-efficiency *)"]
+        )
+        before = path.read_bytes()
+        code, doctor = self.doctor()
+        assert isinstance(doctor, dict)
+        self.assertEqual(code, 0)
+        self.assertTrue(doctor["ok"])
+        self.assertEqual(path.read_bytes(), before)
+        self.assertIn(
+            "not checked", doctor["permission_settings"]["not_checked"]["codex"]
+        )
+
+    def test_text_output_lists_each_action(self) -> None:
+        self.settings(self.home / ".claude" / "settings.json", ask=["Bash(gh *)"])
+        _, text = self.doctor(text=True)
+        self.assertIn("permission_settings in", text)
+        self.assertIn("    gh: ask (ask Bash(gh *) in", text)
+        self.assertIn("    git merge: not set", text)
