@@ -169,6 +169,54 @@ class DataFolderSettingsTests(DoctorCase):
         self.assertEqual(code, 0)
         self.assertEqual(report["findings"], [])
 
+    def status_line(self, command: str) -> tuple[int, dict]:
+        self.user_settings({"statusLine": {"type": "command", "command": command}})
+        return self.report()
+
+    def test_another_tool_after_a_control_operator_is_ignored(self) -> None:
+        commands = [
+            f"agent-efficiency statusline{operator} other-tool --data-dir /x"
+            for operator in ("; ", " ; ", " && ", " || ", " | ", "|")
+        ]
+        for command in commands:
+            with self.subTest(command=command):
+                code, report = self.status_line(command)
+                self.assertEqual(code, 0)
+                self.assertEqual(report["findings"], [])
+                self.assertEqual(report["problems"], [])
+
+    def test_an_export_before_the_tool_applies_to_it(self) -> None:
+        code, report = self.status_line(
+            "export AGENT_EFFICIENCY_DATA=$HOME/data; agent-efficiency statusline"
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(report["findings"], [])
+        self.assertEqual(report["problems"], [])
+        code, report = self.status_line(
+            f"export AGENT_EFFICIENCY_DATA={self.other}; agent-efficiency statusline"
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual([item["folder"] for item in report["findings"]], [self.other])
+
+    def test_a_variable_that_starts_with_home_is_not_checked(self) -> None:
+        for command in (
+            "AGENT_EFFICIENCY_DATA=$HOMEDIR/data agent-efficiency statusline",
+            "agent-efficiency --data-dir $HOME_DATA statusline",
+        ):
+            with self.subTest(command=command):
+                code, report = self.status_line(command)
+                self.assertEqual(code, 0)
+                self.assertEqual(report["findings"], [])
+                self.assertIn("not checked", report["problems"][0]["status"])
+
+    def test_braced_home_is_the_home_folder(self) -> None:
+        code, report = self.status_line(
+            "agent-efficiency --data-dir ${HOME}/data statusline"
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(report["findings"], [])
+        self.assertEqual(report["problems"], [])
+
     def test_two_profiles_that_split_the_store_are_both_named(self) -> None:
         first = self.home / "profile-one"
         second = self.home / "profile-two"
