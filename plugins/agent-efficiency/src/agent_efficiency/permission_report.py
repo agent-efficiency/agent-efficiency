@@ -7,8 +7,11 @@ never changes a settings file, and the result does not change doctor's ok.
 
 The rule reader is small on purpose. It reads ``Bash``, ``Bash(*)``,
 ``Bash(prefix:*)``, ``Bash(prefix *)``, ``Bash(prefix*)``, and
-``Bash(exact command)``. Any other ``Bash`` rule is listed as not interpreted,
-never guessed. Rules for other tools do not apply to these actions.
+``Bash(exact command)``. Any other ``Bash`` rule, or one whose command holds
+whitespace other than single spaces between words, is listed as not
+interpreted, never guessed. Rules for other tools do not apply to these
+actions. For this tool's own command only the bare name ``agent-efficiency``
+is matched; rules for an interpreter or a full path are not evaluated.
 """
 
 from __future__ import annotations
@@ -25,6 +28,14 @@ ACTIONS = ("git merge", "gh", "agent-efficiency")
 DECISION_ORDER = ("deny", "ask", "allow")
 NOT_SET = "not set"
 BASH_RULE = re.compile(r"Bash(?:\((?P<spec>.*)\))?", re.DOTALL)
+# A tab, a newline, any other space character, or a run of spaces. The host may
+# not match these as one space, so such a rule is not interpreted.
+OTHER_WHITESPACE = re.compile(r"[^\S ]| {2}")
+TOOL_COMMAND_CHECK = (
+    "the agent-efficiency check matches only the bare command name "
+    "agent-efficiency. Rules that allow an interpreter or a full path, such as "
+    "Bash(python3:*), can also run the tool and are not evaluated here."
+)
 NOT_CHECKED = {
     "codex": "not checked: this report reads Claude Code settings only",
     "cursor": "not checked: this report reads Claude Code settings only",
@@ -59,11 +70,11 @@ def interpret_rule(rule: str) -> tuple[str, str] | None:
         kind, prefix = "text", spec[:-1]
     else:
         kind, prefix = "exact", spec
-    if not prefix.strip() or "*" in prefix or "\n" in prefix:
+    if not prefix.strip() or "*" in prefix or OTHER_WHITESPACE.search(spec):
         return ("unknown", "")
     if kind == "text":
         return kind, prefix.lstrip()
-    return kind, " ".join(prefix.split())
+    return kind, prefix.strip()
 
 
 def coverage(kind: str, prefix: str, action: str) -> str | None:
@@ -112,6 +123,7 @@ def permission_report(
         "folder": str(folder),
         "informational": True,
         "profiles": profiles,
+        "tool_command_check": TOOL_COMMAND_CHECK,
         "not_checked": NOT_CHECKED,
     }
 
