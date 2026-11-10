@@ -45,6 +45,7 @@ from agent_efficiency.paths import (
     in_plugin_folder,
     is_private,
 )
+from agent_efficiency.permission_report import permission_report
 from agent_efficiency.policy import PolicyPack
 from agent_efficiency.python_support import (
     MINIMUM_PYTHON,
@@ -1529,6 +1530,7 @@ def _doctor(
         "installed_hosts_ready": all(
             host["ready"] is not False for host in installed.values()
         ),
+        "permission_settings": permission_report(here, config_folders, Path.home()),
         "fetch_observation_limit": (
             "an observed fetch does not prove remote freshness"
         ),
@@ -1742,6 +1744,7 @@ DOCTOR_TEXT_KEYS = (
     "codex",
     "hosts",
     "installed_hosts",
+    "permission_settings",
     "fetch_observation_limit",
     "privacy",
 )
@@ -1761,6 +1764,8 @@ def _format_doctor(result: dict[str, Any]) -> str:
             lines.extend(_format_data_dir_settings(value))
         elif key == "digest_key":
             lines.append(f"digest_key: {value['message']}")
+        elif key == "permission_settings":
+            lines.extend(_format_permission_settings(value))
         elif key == "unused_data_dirs":
             if not value:
                 lines.append(f"{key}: none")
@@ -1786,6 +1791,46 @@ def _format_data_dir_settings(value: dict[str, Any]) -> list[str]:
     lines.extend(
         f"  {problem['file']}: {problem['status']}" for problem in value["problems"]
     )
+    lines.extend(
+        f"  {HOST_NAMES.get(name, name)}: {text}"
+        for name, text in value["not_checked"].items()
+    )
+    return lines
+
+
+def _format_permission_settings(value: dict[str, Any]) -> list[str]:
+    lines = [
+        f"permission_settings in {value['folder']} (informational; doctor never "
+        "changes these files):"
+    ]
+    for profile in value["profiles"]:
+        trust = "saved" if profile["workspace_trusted"] else "not saved"
+        lines.append(
+            f"  Claude Code profile {profile['config_folder']} "
+            f"(workspace trust {trust}):"
+        )
+        for action, result in profile["actions"].items():
+            rules = "; ".join(
+                f"{rule['list']} {rule['rule']} in {rule['file']}"
+                + ("" if rule["covers"] == "all" else ", some forms only")
+                for rule in result["rules"]
+            )
+            lines.append(
+                f"    {action}: {result['decision']}" + (f" ({rules})" if rules else "")
+            )
+        lines.extend(
+            f"    not interpreted: {rule['list']} {rule['rule']} in {rule['file']}"
+            for rule in profile["not_interpreted"]
+        )
+        lines.extend(
+            f"    defaultMode {mode['value']} in {mode['file']}"
+            for mode in profile["default_mode"]
+        )
+        lines.extend(
+            f"    {item['file']}: {item['status']}"
+            for item in profile["files"]
+            if item["status"] != "read"
+        )
     lines.extend(
         f"  {HOST_NAMES.get(name, name)}: {text}"
         for name, text in value["not_checked"].items()
