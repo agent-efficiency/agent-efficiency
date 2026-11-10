@@ -9,7 +9,9 @@ agent-efficiency doctor
 agent-efficiency doctor --cwd ~/code/app
 ```
 
-`--cwd` checks a project folder other than the one you are in.
+`--cwd` checks a project folder other than the one you are in. If you run
+Claude Code with more than one config folder, name each extra one with
+`--host-config DIR` so its settings are checked too.
 
 ## Symptoms
 
@@ -28,6 +30,9 @@ agent-efficiency doctor --cwd ~/code/app
 | A check result is `inconclusive`. | The workspace could not be read, or the check changed files. | Read the reason code. See [Verification troubleshooting](verification.md#troubleshooting). |
 | A new vault note does not reach sessions. | The tree's `index.json` is older than the notes. | Run `agent-efficiency vault index TREE` and commit `index.json` and `INDEX.md`. |
 | `doctor` says other users can access the data folder or files in it. | The folder existed before Agent Efficiency, or a file was made readable. | Run the `chmod -R go-rwx` command it prints. |
+| `doctor` fails on `data_dir_settings`. | A Claude Code setting sends hook or status line writes to another data folder, so cost and hook events land in two stores. | Change each setting a `fix:` line names. See [Split data folder](#split-data-folder). |
+| `doctor` fails on `digest_key`. | `digest.key` is not a private regular file holding 64 hex characters. | Move it aside, for example to `digest.key.bad`. The next hook event creates a new key. |
+| Guard keeps asking the agent to tell you about `agent-efficiency.toml`. | The file changed, stopped loading, or was removed during the session. | Type `$agent-efficiency guard` to accept the current file, or restore it. See [Modes](modes.md#when-the-config-changes-during-a-session). |
 
 ## Plugin disabled in a folder
 
@@ -79,6 +84,33 @@ unused_data_dirs:
 
 Removing the Claude Code marketplace or uninstalling the plugin without
 `--keep-data` deletes the old plugin data folder. Run `doctor` before you do.
+
+## Split data folder
+
+Hooks, the status line, and the terminal command share one store only when
+they use one data folder. A Claude Code settings file can move it with
+`env.AGENT_EFFICIENCY_DATA`, or with `--data-dir` in `statusLine.command`.
+`doctor` checks `~/.claude`, the folder `CLAUDE_CONFIG_DIR` names, the
+project settings, and each `--host-config` folder, and names each setting
+that points away from its own data folder:
+
+```text
+data_dir_settings: 1 setting(s) send writes to a data folder other than /home/you/.local/share/agent-efficiency, so hooks, the status line, and doctor do not share one store
+  split: /home/you/.claude-work/settings.json sets env.AGENT_EFFICIENCY_DATA to /home/you/ae-data
+    fix: change env.AGENT_EFFICIENCY_DATA in /home/you/.claude-work/settings.json to /home/you/.local/share/agent-efficiency
+```
+
+`doctor` never edits a settings file. Pick one folder, make every setting
+name it, and run `doctor` with the same folder (`--data-dir` or
+`AGENT_EFFICIENCY_DATA`). Codex and Cursor settings are not checked.
+
+## Permission settings
+
+`doctor` also lists, for each Claude Code config folder, whether
+`git merge`, `gh`, and `agent-efficiency` are allowed, asked, denied, or not
+set in the project, with the rule and file that decide it. It is there so
+you can see the choice; it does not change the doctor result or any file. A
+rule it cannot read is listed as not interpreted.
 
 ## Still stuck
 

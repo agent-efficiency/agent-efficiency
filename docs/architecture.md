@@ -126,7 +126,7 @@ The runtime reduces native event data to controlled facts:
 
 - host and lifecycle event;
 - task class and risk class;
-- action class and one-way action fingerprint;
+- action class and keyed one-way action fingerprint;
 - code-edit and validation flags;
 - failure, repetition, scan, subagent, and compaction counters;
 - supported host effects;
@@ -324,6 +324,11 @@ Guard mode is the exception only after all of these conditions hold:
 5. The turn changed code.
 6. The host supports a bounded continuation.
 7. The turn has not already used its continuation.
+
+Guard also continues a stopped turn once after a code change when the
+project config pinned for the session has changed, no longer loads, or was
+removed. The message is fixed text. Only the user's guard control in the
+session accepts a changed config.
 
 ## Package layout
 
