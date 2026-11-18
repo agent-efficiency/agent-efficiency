@@ -1,6 +1,9 @@
 # Pi field opportunities: cost to a verified result
 
-Status: proposed backlog, not implemented policies or demonstrated savings.
+Original status: proposed backlog, not demonstrated savings. The subsequent
+[implementation acceptance matrix](2026-11-field-acceptance.md) records validated
+CLI/observe-only capabilities, unsupported host paths and rollout limits. No new
+bundled advice is enabled.
 
 These opportunities came from one ongoing coding session using the experimental
 Pi observe-only adapter. The evidence combines local telemetry inspection with a
