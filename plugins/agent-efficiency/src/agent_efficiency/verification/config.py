@@ -41,6 +41,7 @@ class CheckDefinition:
     max_age_seconds: int | None
     env_allowlist: tuple[str, ...]
     digest: str
+    depends_on: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +85,7 @@ def load_project_config(root: str | Path = ".") -> ProjectConfig:
     seen: set[str] = set()
     for value in values:
         checks.append(_parse_check(value, seen))
+    _validate_dependencies(checks)
     canonical = {
         "version": 1,
         "mode": mode,
@@ -150,6 +152,7 @@ def _parse_check(value: Any, seen: set[str]) -> CheckDefinition:
         "timeout_seconds",
         "max_age_seconds",
         "env_allowlist",
+        "depends_on",
     }
     if set(value) - allowed:
         raise ValueError("check has unknown fields")
@@ -163,6 +166,11 @@ def _parse_check(value: Any, seen: set[str]) -> CheckDefinition:
     applies_to = _string_tuple(value.get("applies_to", []), "applies_to")
     required_for = _string_tuple(value.get("required_for", []), "required_for")
     env_allowlist = _string_tuple(value.get("env_allowlist", []), "env_allowlist")
+    depends_on = _string_tuple(value.get("depends_on", []), "depends_on")
+    if len(set(depends_on)) != len(depends_on) or any(
+        not CHECK_ID_RE.fullmatch(item) for item in depends_on
+    ):
+        raise ValueError(f"{check_id}: invalid or duplicate prerequisite")
     if any(not item.isidentifier() or len(item) > 80 for item in env_allowlist):
         raise ValueError(f"{check_id}: invalid environment variable name")
     timeout = value.get("timeout_seconds", 300)
@@ -188,6 +196,8 @@ def _parse_check(value: Any, seen: set[str]) -> CheckDefinition:
         "max_age_seconds": max_age,
         "env_allowlist": env_allowlist,
     }
+    if depends_on:
+        canonical["depends_on"] = depends_on
     return CheckDefinition(
         check_id=check_id,
         command=command,
@@ -197,7 +207,33 @@ def _parse_check(value: Any, seen: set[str]) -> CheckDefinition:
         max_age_seconds=max_age,
         env_allowlist=env_allowlist,
         digest=_digest(canonical),
+        depends_on=depends_on,
     )
+
+
+def _validate_dependencies(checks: list[CheckDefinition]) -> None:
+    """Validate the complete graph without recursion, including unselected checks."""
+    from collections import deque
+
+    by_id = {check.check_id: check for check in checks}
+    remaining = {check.check_id: len(check.depends_on) for check in checks}
+    consumers: dict[str, list[str]] = {key: [] for key in by_id}
+    for check in checks:
+        for dependency in check.depends_on:
+            if dependency not in by_id or dependency == check.check_id:
+                raise ValueError(f"{check.check_id}: unknown or self prerequisite")
+            consumers[dependency].append(check.check_id)
+    ready = deque(key for key, count in remaining.items() if count == 0)
+    visited = 0
+    while ready:
+        key = ready.popleft()
+        visited += 1
+        for consumer in consumers[key]:
+            remaining[consumer] -= 1
+            if remaining[consumer] == 0:
+                ready.append(consumer)
+    if visited != len(checks):
+        raise ValueError("verification prerequisites contain a cycle")
 
 
 def _string_tuple(value: Any, field: str, *, required: bool = False) -> tuple[str, ...]:
@@ -221,6 +257,7 @@ def _check_canonical(check: CheckDefinition) -> dict[str, Any]:
         "timeout_seconds": check.timeout_seconds,
         "max_age_seconds": check.max_age_seconds,
         "env_allowlist": check.env_allowlist,
+        **({"depends_on": check.depends_on} if check.depends_on else {}),
     }
 
 
