@@ -4,12 +4,14 @@ from agent_efficiency.adapters.base import HostAdapter
 from agent_efficiency.adapters.claude import ClaudeAdapter
 from agent_efficiency.adapters.codex import CodexAdapter
 from agent_efficiency.adapters.cursor import CursorAdapter
+from agent_efficiency.adapters.pi import PiAdapter
 
 
 ADAPTERS = {
     "claude": ClaudeAdapter(),
     "codex": CodexAdapter(),
     "cursor": CursorAdapter(),
+    "pi": PiAdapter(),
 }
 
 

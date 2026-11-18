@@ -311,6 +311,10 @@ def _run_hook(
         if lead:
             return {"additional_context": CURSOR_SESSION_CONTEXT}
         return None
+    # Pi observes operational advice candidates without delivering effects.
+    # Session/prompt context and project guard evaluation stay in observe mode.
+    if host == "pi" and mode == "observe":
+        mode = "advise"
     if event == "PreToolUse":
         return _on_pre_tool(
             payload,
@@ -384,6 +388,8 @@ def detect_host(
     payload: dict[str, Any], *, environ: Mapping[str, str] | None = None
 ) -> str:
     env = environ if environ is not None else os.environ
+    if payload.get("host") == "pi":
+        return "pi"
     event = str(payload.get("hook_event_name") or "")
     if (
         payload.get("cursor_version")
@@ -1374,6 +1380,14 @@ def _guidance_output(
     event: str,
     nudge: Nudge,
 ) -> dict[str, Any] | None:
+    if host == "pi":
+        return {
+            "preview": {
+                "policy_id": nudge.policy_id,
+                "reason": _policy_fact_class(nudge.policy_id),
+                "event": event,
+            }
+        }
     effect = CanonicalEffect(
         effect="add_context",
         policy_id=nudge.policy_id,
