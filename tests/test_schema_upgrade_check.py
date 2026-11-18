@@ -49,6 +49,16 @@ class SchemaUpgradeCheckTests(unittest.TestCase):
         cls.git(cls.fixture_repo, "add", ".")
         cls.git(cls.fixture_repo, "commit", "-qm", "test: schema 7 fixture")
         cls.baseline = cls.git(cls.fixture_repo, "rev-parse", "HEAD")
+        schema_eight = candidate.replace(
+            f'SCHEMA_VERSION = "{SCHEMA_VERSION}"', 'SCHEMA_VERSION = "8"'
+        ).replace(
+            "_sql_choices(VERIFICATION_REASONS)",
+            "_sql_choices(VERIFICATION_REASONS[:6])",
+        )
+        source.write_text(schema_eight)
+        cls.git(cls.fixture_repo, "add", ".")
+        cls.git(cls.fixture_repo, "commit", "-qm", "test: schema 8 fixture")
+        cls.baseline_eight = cls.git(cls.fixture_repo, "rev-parse", "HEAD")
         source.write_text(candidate)
         cls.git(cls.fixture_repo, "add", ".")
         cls.git(cls.fixture_repo, "commit", "-qm", "test: current schema fixture")
@@ -155,7 +165,21 @@ class SchemaUpgradeCheckTests(unittest.TestCase):
             json.loads((self.artifacts / "result.json").read_text()), result
         )
 
-    def test_a_schema_eight_baseline_cannot_pass(self) -> None:
+    def test_schema_eight_migration_preserves_receipts_and_rolls_back(self) -> None:
+        result = self.run_check(self.baseline_eight)
+        self.assertTrue(
+            result["ok"], f"{result.get('failed_step')}: {result.get('error')}"
+        )
+        self.assertEqual(result["snapshots"]["baseline"]["schema"], "8")
+        self.assertEqual(result["snapshots"]["migrated"]["schema"], SCHEMA_VERSION)
+        self.assertEqual(
+            result["snapshots"]["restored"], result["snapshots"]["baseline"]
+        )
+        self.assertTrue(
+            (self.artifacts / "upgraded/agent-efficiency.db.schema-8.bak").is_file()
+        )
+
+    def test_current_schema_baseline_cannot_pass(self) -> None:
         result = self.run_check(self.candidate)
         self.assertFalse(result["ok"])
         self.assertEqual(result["failed_step"], "seed_baseline")
