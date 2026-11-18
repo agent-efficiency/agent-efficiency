@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 from agent_efficiency.paths import PLUGIN_ROOT
-from agent_efficiency.store import Store
+from agent_efficiency.store import SCHEMA_VERSION, Store
 from scripts import check_schema_upgrade as check
 
 
@@ -37,7 +37,9 @@ class SchemaUpgradeCheckTests(unittest.TestCase):
         # A separate release rehearsal uses the actual schema 7 source commit.
         source = cls.fixture_repo / STORE
         candidate = source.read_text()
-        old = candidate.replace('SCHEMA_VERSION = "8"', 'SCHEMA_VERSION = "7"')
+        old = candidate.replace(
+            f'SCHEMA_VERSION = "{SCHEMA_VERSION}"', 'SCHEMA_VERSION = "7"'
+        )
         old = old.replace(
             "                    resolves INTEGER NOT NULL DEFAULT 0 CHECK(resolves IN (0, 1)),\n",
             "",
@@ -49,7 +51,7 @@ class SchemaUpgradeCheckTests(unittest.TestCase):
         cls.baseline = cls.git(cls.fixture_repo, "rev-parse", "HEAD")
         source.write_text(candidate)
         cls.git(cls.fixture_repo, "add", ".")
-        cls.git(cls.fixture_repo, "commit", "-qm", "test: schema 8 fixture")
+        cls.git(cls.fixture_repo, "commit", "-qm", "test: current schema fixture")
         cls.candidate = cls.git(cls.fixture_repo, "rev-parse", "HEAD")
 
     @staticmethod
@@ -97,7 +99,7 @@ class SchemaUpgradeCheckTests(unittest.TestCase):
         self.assertEqual(result["inputs"]["candidate_commit"], self.candidate)
         snapshots = result["snapshots"]
         self.assertEqual(snapshots["baseline"]["schema"], "7")
-        self.assertEqual(snapshots["migrated"]["schema"], "8")
+        self.assertEqual(snapshots["migrated"]["schema"], SCHEMA_VERSION)
         self.assertEqual(snapshots["restored"], snapshots["baseline"])
         self.assertGreater(
             snapshots["baseline"]["tables"]["vault_receipts"]["count"], 0

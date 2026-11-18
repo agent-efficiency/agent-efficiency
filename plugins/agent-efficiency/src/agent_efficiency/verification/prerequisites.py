@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from agent_efficiency.store import Store, project_identity
 from agent_efficiency.verification.config import CheckDefinition, ProjectConfig
 from agent_efficiency.verification.receipts import receipt_state
+from agent_efficiency.verification.environment import check_identity
 from agent_efficiency.verification.state import workspace_state
 
 
@@ -43,7 +44,7 @@ def prerequisite_plan(
     states = {
         key: receipt_state(
             latest.get(key),
-            check_digest=by_id[key].digest,
+            check_digest=check_identity(by_id[key], store),
             workspace_digest=state.digest,
             max_age_seconds=by_id[key].max_age_seconds,
         )

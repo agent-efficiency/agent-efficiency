@@ -397,13 +397,14 @@ def run_rehearsal(
             untouched = data_state(upgraded)
             result = runner.python(new, upgraded, action="--check")
             status = json.loads(result.stdout)
+            target_schema = status["target_schema"]
             require(
                 status["current_schema"] == "7"
-                and status["target_schema"] == "8"
+                and target_schema in {"8", "9"}
                 and status["migration_required"] is True
                 and status["supported"] is True
                 and status["applied"] is False,
-                "migration check did not identify schema 7 to 8",
+                "migration check did not identify a supported schema 7 upgrade",
             )
             require(
                 data_state(upgraded) == untouched,
@@ -417,7 +418,10 @@ def run_rehearsal(
             )
         with runner.step("verify_migration"):
             after = snapshots["migrated"] = snapshot(upgraded / DATABASE, before)
-            require(after["schema"] == "8", "migration did not produce schema 8")
+            require(
+                after["schema"] == target_schema,
+                "migration did not produce the target schema",
+            )
             require(
                 after["tables"] == before["tables"],
                 "migration changed historical records or receipts",
@@ -450,8 +454,8 @@ def run_rehearsal(
             unchanged = data_state(upgraded)
             result = runner.python(old, upgraded, code=OPEN_STORE, expected=1)
             require(
-                "unsupported data schema version: 8" in result.stderr,
-                "old runtime did not reject schema 8 for the expected reason",
+                f"unsupported data schema version: {target_schema}" in result.stderr,
+                "old runtime did not reject the target schema for the expected reason",
             )
             require(
                 data_state(upgraded) == unchanged,

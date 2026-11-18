@@ -30,6 +30,7 @@ from agent_efficiency.verification.config import (
     load_project_config,
 )
 from agent_efficiency.verification.receipts import receipt_state
+from agent_efficiency.verification.environment import check_identity
 from agent_efficiency.verification.state import workspace_state
 from agent_efficiency.policy import PolicyPack, classify_task, classify_tool
 from agent_efficiency.store import Store, project_identity
@@ -1216,7 +1217,7 @@ def _guard_stop_effect(
         receipts = store.verification_receipts(project_key, check_id=check.check_id)
         status = receipt_state(
             receipts[0] if receipts else None,
-            check_digest=check.digest,
+            check_digest=check_identity(check, store),
             workspace_digest=workspace.digest,
             max_age_seconds=check.max_age_seconds,
         )
