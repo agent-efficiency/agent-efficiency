@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rehearse schema 7 to 8 migration and rollback with synthetic data only."""
+"""Rehearse schema 7/8 upgrades and rollback with synthetic data only."""
 
 from __future__ import annotations
 
@@ -92,7 +92,11 @@ def folder_digest(folder: Path, *, sidecars: bool = True) -> dict[str, dict[str,
             or str(path.relative_to(folder))
             not in {
                 f"{name}{suffix}"
-                for name in (DATABASE, f"{DATABASE}.schema-7.bak")
+                for name in (
+                    DATABASE,
+                    f"{DATABASE}.schema-7.bak",
+                    f"{DATABASE}.schema-8.bak",
+                )
                 for suffix in ("-shm", "-wal")
             }
         )
@@ -379,10 +383,12 @@ def run_rehearsal(
             runner.python(old, data, code=SEED)
             (data / "rehearsal-marker.json").write_text('{"synthetic": true}\n')
             before = snapshots["baseline"] = snapshot(data / DATABASE)
-            require(before["schema"] == "7", "baseline must create schema 7")
+            baseline_schema = before["schema"]
+            require(baseline_schema in {"7", "8"}, "baseline must create schema 7 or 8")
             require(
-                "resolves" not in before["tables"]["events"]["columns"],
-                "baseline already has schema 8 event accounting",
+                ("resolves" in before["tables"]["events"]["columns"])
+                == (baseline_schema == "8"),
+                "baseline event accounting does not match its declared schema",
             )
         with runner.step("copy_backup"):
             shutil.copytree(data, backup)
@@ -399,12 +405,13 @@ def run_rehearsal(
             status = json.loads(result.stdout)
             target_schema = status["target_schema"]
             require(
-                status["current_schema"] == "7"
+                status["current_schema"] == baseline_schema
                 and target_schema in {"8", "9"}
+                and int(target_schema) > int(baseline_schema)
                 and status["migration_required"] is True
                 and status["supported"] is True
                 and status["applied"] is False,
-                "migration check did not identify a supported schema 7 upgrade",
+                "migration check did not identify a supported baseline upgrade",
             )
             require(
                 data_state(upgraded) == untouched,
@@ -426,17 +433,20 @@ def run_rehearsal(
                 after["tables"] == before["tables"],
                 "migration changed historical records or receipts",
             )
-            with closing(
-                sqlite3.connect((upgraded / DATABASE).as_uri() + "?mode=ro", uri=True)
-            ) as conn:
-                require(
-                    conn.execute(
-                        "SELECT COUNT(*) FROM events WHERE resolves != 0"
-                    ).fetchone()[0]
-                    == 0,
-                    "migration recalculated historical event outcomes",
-                )
-            automatic = upgraded / f"{DATABASE}.schema-7.bak"
+            if baseline_schema == "7":
+                with closing(
+                    sqlite3.connect(
+                        (upgraded / DATABASE).as_uri() + "?mode=ro", uri=True
+                    )
+                ) as conn:
+                    require(
+                        conn.execute(
+                            "SELECT COUNT(*) FROM events WHERE resolves != 0"
+                        ).fetchone()[0]
+                        == 0,
+                        "migration recalculated historical event outcomes",
+                    )
+            automatic = upgraded / f"{DATABASE}.schema-{baseline_schema}.bak"
             require(automatic.is_file(), "automatic schema backup is missing")
             require(
                 snapshot(automatic) == before,

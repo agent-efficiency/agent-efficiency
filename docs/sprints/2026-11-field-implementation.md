@@ -49,8 +49,11 @@ the updated assertions retain event-preservation checks and target the current
 schema. Its full retry passed all 946 tests. Subsequent cancellation, Pi coverage,
 and rated-cohort changes passed final validation: **960 Python tests, 7 Pi Node
 tests**, both pack checks, distribution validation, real wheel installation, and
-all pre-commit checks. Migration/rollback rehearsal against committed source and
-final acceptance review remain before closing the field backlog.
+all pre-commit checks. Real schema-7 and schema-8 migration/rollback rehearsals
+passed against committed runtime source. The expanded tooling suite passed all
+961 tests, with the retained-artifact acceptance test passing separately. Doctor,
+plugin validation and final repository gates passed. See the
+[acceptance matrix](2026-11-field-acceptance.md) for scope and limitations.
 
 Seven real-worker/negative controls now pass: detached completion, launch failure,
 private explicit output, no output truncation, timeout, atomic receipt/job rollback,
@@ -66,10 +69,10 @@ phases and same-project session links; existing experiment cohorts include these
 annotations even for unaccepted work, without adding potentially overlapping costs
 to the original comparison metrics. Workflow and experiment regressions pass.
 
-Remaining acceptance work includes migration/distribution review and final complete
-gates. External host completion interception is intentionally unsupported, not
-implied by managed CLI support. Do not label all nine opportunities complete until
-the reviewed acceptance matrix and remaining gates establish their actual scope.
+Local implementation acceptance is complete within the matrix's explicit scope.
+External host completion interception is intentionally unsupported, not implied by
+managed CLI support. Live coordinated installation and any future host interception
+remain separate work; neither is authorized by passing local gates.
 
 ## Gates for each slice
 

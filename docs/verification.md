@@ -298,6 +298,9 @@ are current. It returns the same receipt ID; stale or failed evidence is rerun.
 Default `check` behavior is unchanged. Reuse cannot be combined with `--background`
 or `--plan`. Retained artifact comparisons should be configured as real checks:
 identical declared source is not permission to substitute unreviewed output files.
+Artifacts must be within the check's declared identity boundary: ignored files and
+external paths are not covered by the workspace digest. Rerun comparisons for those
+inputs rather than treating an unchanged workspace as proof they are unchanged.
 
 ## Ordered milestone continuity
 
