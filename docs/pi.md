@@ -98,3 +98,8 @@ discovery, and `/efficiency status`, without a model request.
 Next stages: opt-in advisory effect delivery, explicit verification checks with project
 trust/consent and environment-aware receipts, then separately reviewed bounded
 completion guards. Existing project gates remain authoritative.
+
+The [Pi field-opportunity backlog](sprints/2026-11-pi-field-opportunities.md)
+records observed prerequisite, background-result and environment gaps, plus
+proposed acceptance tests. These are research/design items, not implemented
+interventions or evidence of savings.
