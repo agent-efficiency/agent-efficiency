@@ -134,7 +134,7 @@ class InstallScriptTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         calls = self.calls()
         self.assertIn(
-            "claude plugin marketplace add agent-efficiency/agent-efficiency#v0.2.2",
+            "claude plugin marketplace add agent-efficiency/agent-efficiency#v0.3.0",
             calls,
         )
         self.assertIn(
@@ -142,7 +142,7 @@ class InstallScriptTests(unittest.TestCase):
             calls,
         )
         self.assertIn(
-            "pipx install --force git+https://github.com/agent-efficiency/agent-efficiency@v0.2.2",
+            "pipx install --force git+https://github.com/agent-efficiency/agent-efficiency@v0.3.0",
             calls,
         )
         self.assertEqual(calls[-1], f"agent-efficiency data= doctor --cwd {self.home}")
@@ -259,7 +259,7 @@ class InstallScriptTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(
             "uvx --from pipx pipx install --force "
-            "git+https://github.com/agent-efficiency/agent-efficiency@v0.2.2",
+            "git+https://github.com/agent-efficiency/agent-efficiency@v0.3.0",
             self.calls(),
         )
 

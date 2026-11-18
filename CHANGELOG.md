@@ -1,10 +1,10 @@
 # Changelog
 
-## 0.3.0 - Unreleased
+## 0.3.0 - 2026-11-18
 
-This version requires the [coordinated schema-9 upgrade](docs/schema-9-upgrade.md).
-The tagged installer remains pinned to published 0.2.2 until release approval;
-use an explicit source checkout to review this unreleased candidate.
+See the [release notes](docs/releases/0.3.0.md). This version requires the
+[coordinated schema-9 upgrade](docs/schema-9-upgrade.md) before upgrading an
+existing installation. The installer and tagged examples target `v0.3.0`.
 
 ### Workflow verification
 

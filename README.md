@@ -27,12 +27,40 @@ model calls and no network requests.
   9,000 characters.
 - **Stays on your machine.** It keeps counts and states in one local SQLite
   file. It never stores prompts, code, commands, tool output, or transcripts.
-- **Works in three hosts.** Claude Code, Codex, and Cursor share one runtime,
-  written with only the Python standard library.
+- **Keeps workflow evidence honest.** Preview prerequisites, run tracked background
+  checks, distinguish invalid probes from test failures, and reuse only current
+  evidence. Ordered milestones and rated rework reports preserve plan state without
+  inventing completion or savings.
+- **Works across hosts.** Claude Code, Codex, and Cursor share one standard-library
+  runtime. The experimental [Pi adapter](docs/pi.md) is observe-only: previews are
+  not delivered interventions, and external background completion is unavailable.
+
+## New in 0.3.0
+
+[Release notes](docs/releases/0.3.0.md) · [Verification guide](docs/verification.md)
+
+```bash
+agent-efficiency check full --plan
+agent-efficiency check unit --background
+agent-efficiency jobs
+agent-efficiency evidence explain --json
+agent-efficiency check unit --reuse-current
+agent-efficiency workflow status
+agent-efficiency workflow report
+```
+
+Configure your own checks first; names above are examples. Launch success is not a
+passing receipt. Optional environment selectors and structured summaries bind and
+explain results; no arbitrary command output is retained in telemetry.
+
+**Upgrading an existing installation? 0.3.0 uses schema 9.** Stop all writers and
+back up the complete private data folder, then upgrade the command, plugins and
+source loaders together. Read the [coordinated upgrade guide](docs/schema-9-upgrade.md)
+**before installing**. Do not reload a host while tracked jobs are running.
 
 ## Quick start for Claude Code
 
-The tagged install examples target version 0.2.2. To review an unreleased
+The tagged install examples target version 0.3.0. To review an unreleased
 checkout, use the
 [local development steps](docs/development.md#try-your-checkout-in-a-host).
 
@@ -43,7 +71,7 @@ You need Claude Code, Python 3.11 or newer as `python3` on your PATH, and
    `agent-efficiency` command, then checks the setup:
 
    ```bash
-   git clone --branch v0.2.2 https://github.com/agent-efficiency/agent-efficiency.git
+   git clone --branch v0.3.0 https://github.com/agent-efficiency/agent-efficiency.git
    cd agent-efficiency
    bash install.sh
    ```
@@ -53,7 +81,7 @@ You need Claude Code, Python 3.11 or newer as `python3` on your PATH, and
    ```text
    Agent Efficiency doctor: OK
    ...
-   Claude Code: ready, 0.2.2 (user scope) at /home/you/.claude/plugins/cache/agent-efficiency/agent-efficiency/0.2.2
+   Claude Code: ready, 0.3.0 (user scope) at /home/you/.claude/plugins/cache/agent-efficiency/agent-efficiency/0.3.0
    ...
    Run /reload-plugins in any open Claude Code session, or start a new session.
    ```
@@ -64,9 +92,9 @@ You need Claude Code, Python 3.11 or newer as `python3` on your PATH, and
    The same steps by hand, without the clone:
 
    ```bash
-   claude plugin marketplace add "agent-efficiency/agent-efficiency#v0.2.2"
+   claude plugin marketplace add "agent-efficiency/agent-efficiency#v0.3.0"
    claude plugin install agent-efficiency@agent-efficiency
-   pipx install git+https://github.com/agent-efficiency/agent-efficiency@v0.2.2
+   pipx install git+https://github.com/agent-efficiency/agent-efficiency@v0.3.0
    agent-efficiency doctor
    ```
 
