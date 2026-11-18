@@ -42,6 +42,14 @@ class CheckDefinition:
     env_allowlist: tuple[str, ...]
     digest: str
     depends_on: tuple[str, ...] = ()
+    env_fingerprint: tuple[str, ...] = ()
+    result_file: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class MilestoneDefinition:
+    milestone_id: str
+    checks: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +59,7 @@ class ProjectConfig:
     mode: str
     checks: tuple[CheckDefinition, ...]
     digest: str
+    milestones: tuple[MilestoneDefinition, ...] = ()
 
     def get(self, check_id: str) -> CheckDefinition | None:
         return next(
@@ -71,7 +80,7 @@ def load_project_config(root: str | Path = ".") -> ProjectConfig:
         raise ValueError(
             "invalid verification config: it is nested too deeply"
         ) from exc
-    if set(raw) - {"version", "mode", "checks"}:
+    if set(raw) - {"version", "mode", "checks", "milestones"}:
         raise ValueError("verification config has unknown top-level fields")
     if raw.get("version") != 1:
         raise ValueError("verification config version must be 1")
@@ -86,18 +95,43 @@ def load_project_config(root: str | Path = ".") -> ProjectConfig:
     for value in values:
         checks.append(_parse_check(value, seen))
     _validate_dependencies(checks)
+    milestones = _parse_milestones(raw.get("milestones", []), seen)
     canonical = {
         "version": 1,
         "mode": mode,
         "checks": [_check_canonical(check) for check in checks],
     }
+    if milestones:
+        canonical["milestones"] = [
+            {"id": item.milestone_id, "checks": item.checks} for item in milestones
+        ]
     return ProjectConfig(
         root=project_root,
         path=path,
         mode=mode,
         checks=tuple(checks),
         digest=_digest(canonical),
+        milestones=milestones,
     )
+
+
+def _parse_milestones(values: Any, checks: set[str]) -> tuple[MilestoneDefinition, ...]:
+    if not isinstance(values, list) or len(values) > 256:
+        raise ValueError("milestones must be a bounded array")
+    result = []
+    seen = set()
+    for value in values:
+        if not isinstance(value, dict) or set(value) != {"id", "checks"}:
+            raise ValueError("milestone requires only id and checks")
+        key = value["id"]
+        if not isinstance(key, str) or not CHECK_ID_RE.fullmatch(key) or key in seen:
+            raise ValueError("invalid or duplicate milestone id")
+        required = _string_tuple(value["checks"], "milestone checks", required=True)
+        if len(set(required)) != len(required) or not set(required) <= checks:
+            raise ValueError("milestone checks must be unique configured check IDs")
+        seen.add(key)
+        result.append(MilestoneDefinition(key, required))
+    return tuple(result)
 
 
 def _read_config_text(path: Path) -> str:
@@ -153,6 +187,8 @@ def _parse_check(value: Any, seen: set[str]) -> CheckDefinition:
         "max_age_seconds",
         "env_allowlist",
         "depends_on",
+        "env_fingerprint",
+        "result_file",
     }
     if set(value) - allowed:
         raise ValueError("check has unknown fields")
@@ -160,12 +196,33 @@ def _parse_check(value: Any, seen: set[str]) -> CheckDefinition:
     if not CHECK_ID_RE.fullmatch(check_id) or check_id in seen:
         raise ValueError(f"invalid or duplicate check id: {check_id}")
     seen.add(check_id)
+    result_file = value.get("result_file")
+    if result_file is not None and (
+        not isinstance(result_file, str)
+        or not result_file
+        or len(result_file) > 512
+        or Path(result_file).is_absolute()
+        or ".." in Path(result_file).parts
+        or "\x00" in result_file
+    ):
+        raise ValueError(
+            f"{check_id}: result_file must be a relative path inside the project"
+        )
     command = _string_tuple(value.get("command"), "command", required=True)
     if len(command) > 32 or any(len(part) > 1000 for part in command):
         raise ValueError(f"{check_id}: command is too large")
     applies_to = _string_tuple(value.get("applies_to", []), "applies_to")
     required_for = _string_tuple(value.get("required_for", []), "required_for")
     env_allowlist = _string_tuple(value.get("env_allowlist", []), "env_allowlist")
+    env_fingerprint = _string_tuple(value.get("env_fingerprint", []), "env_fingerprint")
+    if (
+        len(env_fingerprint) > 32
+        or len(set(env_fingerprint)) != len(env_fingerprint)
+        or not set(env_fingerprint) <= set(env_allowlist) | {"PATH"}
+    ):
+        raise ValueError(
+            f"{check_id}: environment fingerprint names must be unique and allowed"
+        )
     depends_on = _string_tuple(value.get("depends_on", []), "depends_on")
     if len(set(depends_on)) != len(depends_on) or any(
         not CHECK_ID_RE.fullmatch(item) for item in depends_on
@@ -196,6 +253,10 @@ def _parse_check(value: Any, seen: set[str]) -> CheckDefinition:
         "max_age_seconds": max_age,
         "env_allowlist": env_allowlist,
     }
+    if result_file is not None:
+        canonical["result_file"] = result_file
+    if env_fingerprint:
+        canonical["env_fingerprint"] = env_fingerprint
     if depends_on:
         canonical["depends_on"] = depends_on
     return CheckDefinition(
@@ -208,6 +269,8 @@ def _parse_check(value: Any, seen: set[str]) -> CheckDefinition:
         env_allowlist=env_allowlist,
         digest=_digest(canonical),
         depends_on=depends_on,
+        env_fingerprint=env_fingerprint,
+        result_file=result_file,
     )
 
 
@@ -258,6 +321,8 @@ def _check_canonical(check: CheckDefinition) -> dict[str, Any]:
         "max_age_seconds": check.max_age_seconds,
         "env_allowlist": check.env_allowlist,
         **({"depends_on": check.depends_on} if check.depends_on else {}),
+        **({"env_fingerprint": check.env_fingerprint} if check.env_fingerprint else {}),
+        **({"result_file": check.result_file} if check.result_file is not None else {}),
     }
 
 

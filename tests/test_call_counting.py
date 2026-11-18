@@ -21,16 +21,15 @@ def _event_columns(database: Path) -> set[str]:
         return {str(row[1]) for row in conn.execute("PRAGMA table_info(events)")}
 
 
-class SchemaEightTests(unittest.TestCase):
+class EventSchemaMigrationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.database = Path(self.temp.name) / "agent-efficiency.db"
 
-    def test_new_store_is_schema_eight_with_resolves_column(self) -> None:
+    def test_new_store_is_current_schema_with_resolves_column(self) -> None:
         store = Store(self.temp.name)
-        self.assertEqual(SCHEMA_VERSION, "8")
-        self.assertEqual(store.get_setting("schema_version"), "8")
+        self.assertEqual(store.get_setting("schema_version"), SCHEMA_VERSION)
         self.assertIn("resolves", _event_columns(self.database))
 
     def test_schema_seven_store_migrates_and_keeps_events(self) -> None:
@@ -51,7 +50,7 @@ class SchemaEightTests(unittest.TestCase):
             conn.commit()
         migrated = Store(self.temp.name)
         migrated.ensure_current_schema()
-        self.assertEqual(migrated.get_setting("schema_version"), "8")
+        self.assertEqual(migrated.get_setting("schema_version"), SCHEMA_VERSION)
         self.assertIn("resolves", _event_columns(self.database))
         with closing(sqlite3.connect(self.database)) as conn:
             rows = conn.execute("SELECT resolves FROM events").fetchall()

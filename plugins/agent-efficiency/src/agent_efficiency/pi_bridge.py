@@ -98,6 +98,16 @@ def dispatch(payload: dict, store: Store) -> dict:
         "ok": True,
         "mode": session["mode"],
         "host": "pi",
+        # Tool events describe calls, not a custom runner's eventual result.
+        # Null means unavailable coverage, never zero failures or acceptance.
+        "coverage": {
+            "tool_call_outcomes": "supported",
+            "external_background_terminal_results": None,
+            "verified_acceptance": None,
+            "verification_receipts": "explicit_cli_only",
+            "advice": "preview_only",
+        },
+        "delivered_interventions": 0,
         **dict(row),
         "preview_count": preview_count,
         "previews": previews,

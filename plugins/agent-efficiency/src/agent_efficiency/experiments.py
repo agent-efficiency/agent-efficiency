@@ -426,6 +426,12 @@ def build_experiment_evaluation(
             for cohort in VALID_COHORTS
         }
         summaries = {cohort: _arm_summary(arm) for cohort, arm in arms.items()}
+        from agent_efficiency.verification.workflow import cohort_annotations
+
+        for cohort, arm in arms.items():
+            summaries[cohort]["workflow_annotations"] = cohort_annotations(
+                store, [row["session_id"] for row in arm]
+            )
         valid = {
             cohort: [row for row in arm if row["invalidated_at"] is None]
             for cohort, arm in arms.items()

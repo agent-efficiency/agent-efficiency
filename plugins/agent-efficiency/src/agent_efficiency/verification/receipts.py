@@ -34,6 +34,15 @@ class VerificationReceipt:
 # sentence is written from it when the receipt is shown, so no command text or
 # output is ever stored.
 REASONS = {
+    "structured_failed": "The check summary reports failed assertions.",
+    "structured_baseline_failed": "The check summary reports failed baselines; the probe is inconclusive.",
+    "structured_setup_error": "The check summary reports setup errors before the target assertions.",
+    "structured_survived": "The check summary reports surviving mutations.",
+    "structured_timeout": "The check summary reports timed-out cases.",
+    "structured_incomplete": "The check summary does not cover the whole declared scope.",
+    "structured_invalid": "The configured check summary is missing, unchanged, malformed or outside its allowed path.",
+    "environment_unknown": "The configured environment identity could not be privately established.",
+    "environment_changed": "The configured environment identity changed while the check ran.",
     "exit_nonzero": "The check command exited with status {exit_code}.",
     "timeout": "The check command did not finish within its time limit.",
     "not_started": (
@@ -68,10 +77,34 @@ def reason_text(receipt: dict[str, Any]) -> str | None:
     return template.format(exit_code=receipt.get("exit_code"))
 
 
+def explain_receipt(receipt: dict[str, Any] | None, **identity) -> dict[str, Any]:
+    """Explain existing freshness semantics; never create or promote evidence."""
+    state = receipt_state(receipt, **identity)
+    if receipt is None:
+        reason = "missing_receipt"
+    elif receipt.get("result") != "pass":
+        reason = "latest_result_not_pass"
+    elif identity.get("workspace_digest") is None:
+        reason = "workspace_unknown"
+    elif identity.get("check_digest") is None:
+        reason = "environment_unknown"
+    elif receipt.get("check_digest") != identity["check_digest"]:
+        reason = "check_or_environment_changed"
+    elif receipt.get("workspace_digest") != identity["workspace_digest"]:
+        reason = "workspace_changed"
+    elif state == "stale":
+        reason = "age_expired"
+    elif state == "inconclusive":
+        reason = "receipt_time_invalid"
+    else:
+        reason = "current_receipt"
+    return {"state": state, "reason": reason, "reusable": state == "current"}
+
+
 def receipt_state(
     receipt: dict[str, Any] | None,
     *,
-    check_digest: str,
+    check_digest: str | None,
     workspace_digest: str | None,
     max_age_seconds: int | None = None,
     now: datetime | None = None,
@@ -81,7 +114,7 @@ def receipt_state(
     result = str(receipt.get("result") or "inconclusive")
     if result != "pass":
         return result
-    if workspace_digest is None:
+    if workspace_digest is None or check_digest is None:
         return "inconclusive"
     if receipt.get("check_digest") != check_digest:
         return "stale"
