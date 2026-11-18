@@ -132,6 +132,11 @@ def build_parser() -> argparse.ArgumentParser:
     selection = check.add_mutually_exclusive_group(required=True)
     selection.add_argument("check_id", nargs="?")
     selection.add_argument("--changed", action="store_true")
+    check.add_argument(
+        "--plan",
+        action="store_true",
+        help="Report prerequisite readiness as JSON without running checks.",
+    )
 
     evidence = subparsers.add_parser(
         "evidence", help="Inspect revision-bound verification receipts."
@@ -680,6 +685,12 @@ def _check_project(args: argparse.Namespace, store: Store) -> int:
             if check is None:
                 raise ValueError(f"unknown check: {args.check_id}")
             checks = [check]
+        if args.plan:
+            from agent_efficiency.verification.prerequisites import prerequisite_plan
+
+            plan = prerequisite_plan(config, checks, store)
+            print(json.dumps(plan, sort_keys=True))
+            return 0 if plan["ready"] else 1
         if not checks:
             print("No configured checks apply to the current changes.")
             return 0
