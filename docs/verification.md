@@ -60,6 +60,40 @@ When no check applies to the changed files, it prints
 `check` exits with 0 when every check passed, 1 when any result is not a pass,
 and 2 when the configuration cannot be read or names no such check.
 
+## Preview prerequisite readiness
+
+A check can declare prerequisites for a read-only planning report:
+
+```toml
+[[checks]]
+id = "sanity"
+command = ["python", "scripts/sanity.py"]
+
+[[checks]]
+id = "full"
+command = ["python", "scripts/full_tests.py"]
+depends_on = ["sanity"]
+```
+
+Run `agent-efficiency check full --plan` (or `check --changed --plan`). It
+prints JSON containing selected `targets`, dependency-first `order`, prerequisite
+receipt states, workspace availability, and `ready`. Exit 0 means the workspace
+is readable and all direct/transitive prerequisites have current passing receipts;
+exit 1 means not ready, and exit 2 means invalid configuration. A ready plan does
+**not** mean the target check passed, that the release is ready, or that remote CI
+succeeded. No verification command executes and no verification receipt is created.
+
+Unknown, duplicate, self-referencing and cyclic prerequisites are rejected. A
+latest failed receipt is not replaced by an older passing receipt. Missing, stale,
+expired, blocked or inconclusive evidence does not establish readiness. Empty or
+omitted `depends_on` preserves existing check/configuration digests.
+
+This first implementation is **advisory only**: ordinary `check` execution does
+not automatically run or enforce prerequisites, and hooks do not inject this
+report. Run the prerequisite checks explicitly and preview again. It uses existing
+workspace/configuration receipt freshness; environment-bound and asynchronous
+receipts remain separate planned work.
+
 ## Read the results
 
 ```bash
@@ -161,6 +195,7 @@ never records the command output.
 | `timeout_seconds` | no | 1 to 3600. The default is 300. |
 | `max_age_seconds` | no | A pass older than this is stale. |
 | `env_allowlist` | no | Names of environment variables the check may see. |
+| `depends_on` | no | Unique configured check IDs whose current receipts `check --plan` requires. Advisory only; default `[]`. |
 
 The top level has `version = 1` and `mode`, which is `off`, `observe`,
 `advise`, or `guard`. See [Guard mode](modes.md#guard-mode).
