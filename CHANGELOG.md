@@ -1,6 +1,23 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - Unreleased
+
+This version requires the [coordinated schema-9 upgrade](docs/schema-9-upgrade.md).
+The tagged installer remains pinned to published 0.2.2 until release approval;
+use an explicit source checkout to review this unreleased candidate.
+
+### Workflow verification
+
+- Add read-only prerequisite plans, optional keyed environment identity, managed
+  background checks, and atomic job/receipt completion.
+- Support closed structured result summaries, explicit current-evidence reuse,
+  project-owned ordered milestones, and fixed-code rated rework annotations.
+- Keep rework costs supplemental to matched experiment totals to avoid double
+  counting. Expose unavailable external-background/acceptance coverage explicitly.
+- Add the experimental Pi observe-only adapter and advice previews; no automatic
+  guard enforcement, release approval, or savings claim is enabled.
+- Preserve historical receipts through schema-7/8-to-9 migrations and retain
+  private rollback backups. See the [acceptance matrix](docs/sprints/2026-11-field-acceptance.md).
 
 ### Fixed
 
