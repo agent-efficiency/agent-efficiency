@@ -6,7 +6,8 @@ import hashlib
 import json
 import re
 import sqlite3
-from contextlib import closing, contextmanager
+import time
+from contextlib import closing, contextmanager, nullcontext
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterator
@@ -16,7 +17,7 @@ from agent_efficiency.folder_lock import folder_lock
 from agent_efficiency.paths import RuntimePaths, create_private_file
 
 
-SCHEMA_VERSION = "8"
+SCHEMA_VERSION = "9"
 INTERVENTION_EVENT_WINDOW = 8
 MAX_NUDGES_PER_TURN = 3
 MAX_NUDGES_PER_SESSION = 8
@@ -67,6 +68,15 @@ VERIFICATION_REASONS = (
     "workspace_unknown",
     "workspace_changed",
     "workspace_unreadable",
+    "environment_unknown",
+    "environment_changed",
+    "structured_failed",
+    "structured_baseline_failed",
+    "structured_setup_error",
+    "structured_survived",
+    "structured_timeout",
+    "structured_incomplete",
+    "structured_invalid",
 )
 
 
@@ -139,6 +149,38 @@ def _add_receipt_reason_column(conn: sqlite3.Connection) -> None:
         if owned:
             conn.rollback()
         raise
+
+
+def _upgrade_receipt_reasons(conn: sqlite3.Connection) -> None:
+    """Retain every receipt while extending the closed schema-8 reason vocabulary."""
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    _add_receipt_reason_column(conn)
+    sql = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'verification_receipts'"
+    ).fetchone()[0]
+    if RECEIPT_REASON_COLUMN in sql:
+        return
+    legacy = (
+        "reason_code TEXT CHECK(reason_code IS NULL OR reason_code IN "
+        f"({_sql_choices(VERIFICATION_REASONS[:6])}))"
+    )
+    if sql.count(legacy) != 1:
+        raise ValueError("unrecognized verification receipt reason schema")
+    # No persisted verification table has a foreign key to receipt IDs in schema 8.
+    # All IDs and values survive; the only changed constraint admits two new codes.
+    conn.execute(
+        "ALTER TABLE verification_receipts RENAME TO verification_receipts_previous"
+    )
+    conn.execute(sql.replace(legacy, RECEIPT_REASON_COLUMN))
+    conn.execute(
+        "INSERT INTO verification_receipts SELECT * FROM verification_receipts_previous"
+    )
+    conn.execute("DROP TABLE verification_receipts_previous")
+    conn.execute(
+        "CREATE INDEX verification_receipts_project "
+        "ON verification_receipts(project_key, check_id, id DESC)"
+    )
 
 
 def utc_now() -> str:
@@ -571,7 +613,7 @@ class Store:
                 "SELECT value FROM settings WHERE key = 'schema_version'"
             ).fetchone()
             version = str(row["value"]) if row else "1"
-            if version not in {"1", "2", "3", "4", "5", "6", "7", SCHEMA_VERSION}:
+            if version not in {"1", "2", "3", "4", "5", "6", "7", "8", SCHEMA_VERSION}:
                 raise ValueError(f"unsupported data schema version: {version}")
             if version != SCHEMA_VERSION:
                 backup_path = self.paths.database.with_name(
@@ -902,6 +944,7 @@ class Store:
                     "ALTER TABLE events ADD COLUMN resolves INTEGER NOT NULL "
                     "DEFAULT 0 CHECK(resolves IN (0, 1))"
                 )
+            _upgrade_receipt_reasons(conn)
             conn.execute(
                 "INSERT INTO settings(key, value) VALUES('schema_version', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -910,7 +953,9 @@ class Store:
 
     def ensure_current_schema(self) -> None:
         if self.get_setting("schema_version", "1") != SCHEMA_VERSION:
-            self._migrate()
+            with folder_lock(self.paths.root, time.monotonic() + 1.5):
+                if self.get_setting("schema_version", "1") != SCHEMA_VERSION:
+                    self._migrate()
 
     def migration_status(self) -> dict[str, Any]:
         with self.connect() as conn:
@@ -918,7 +963,7 @@ class Store:
                 "SELECT value FROM settings WHERE key = 'schema_version'"
             ).fetchone()
         version = str(row["value"]) if row else "1"
-        supported = version in {"1", "2", "3", "4", "5", "6", "7", SCHEMA_VERSION}
+        supported = version in {"1", "2", "3", "4", "5", "6", "7", "8", SCHEMA_VERSION}
         backup = self.paths.database.with_name(
             f"{self.paths.database.name}.schema-{version}.bak"
         )
@@ -2981,11 +3026,18 @@ class Store:
         return result
 
     def record_verification_receipt(
-        self, receipt: dict[str, Any], *, project_key: str
+        self,
+        receipt: dict[str, Any],
+        *,
+        project_key: str,
+        _connection: sqlite3.Connection | None = None,
     ) -> int:
         self.ensure_current_schema()
         now = utc_now()
-        with self.connect() as conn:
+        # Managed jobs finalize task state and its receipt in the same transaction.
+        with (
+            nullcontext(_connection) if _connection is not None else self.connect()
+        ) as conn:
             _add_receipt_reason_column(conn)
             conn.execute(
                 """
@@ -3048,7 +3100,30 @@ class Store:
                     receipt.get("reason_code"),
                 ),
             )
-            return int(cursor.lastrowid)
+            receipt_id = int(cursor.lastrowid)
+            if receipt.get("summary") is not None:
+                from agent_efficiency.verification.results import (
+                    COUNTS,
+                    classify_summary,
+                )
+
+                summary = receipt["summary"]
+                classify_summary(summary)
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS verification_summaries ("
+                    "receipt_id INTEGER PRIMARY KEY REFERENCES verification_receipts(id), "
+                    + ", ".join(
+                        f"{name} INTEGER NOT NULL CHECK({name} >= 0)" for name in COUNTS
+                    )
+                    + ")"
+                )
+                conn.execute(
+                    "INSERT INTO verification_summaries VALUES ("
+                    + ",".join("?" for _ in range(len(COUNTS) + 1))
+                    + ")",
+                    (receipt_id, *(summary[name] for name in COUNTS)),
+                )
+            return receipt_id
 
     def verification_receipt(self, receipt_id: int) -> dict[str, Any] | None:
         self.ensure_current_schema()
@@ -3057,6 +3132,20 @@ class Store:
                 "SELECT * FROM verification_receipts WHERE id = ?",
                 (receipt_id,),
             ).fetchone()
+            if (
+                row
+                and conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE name='verification_summaries'"
+                ).fetchone()
+            ):
+                summary = conn.execute(
+                    "SELECT * FROM verification_summaries WHERE receipt_id=?",
+                    (receipt_id,),
+                ).fetchone()
+                if summary:
+                    counts = dict(summary)
+                    counts.pop("receipt_id")
+                    return {**dict(row), "summary": {"version": 1, **counts}}
         return dict(row) if row else None
 
     def verification_receipts(

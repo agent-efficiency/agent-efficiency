@@ -77,6 +77,7 @@ from agent_efficiency.vault import cli_commands as vault_commands
 from agent_efficiency.verification.config import load_project_config
 from agent_efficiency.verification.receipts import reason_text, receipt_state
 from agent_efficiency.verification.runner import run_checks
+from agent_efficiency.verification.environment import check_identity
 from agent_efficiency.verification.state import workspace_state
 
 
@@ -138,6 +139,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Report prerequisite readiness as JSON without running checks.",
     )
 
+    check.add_argument(
+        "--background",
+        action="store_true",
+        help="Launch a managed check without waiting.",
+    )
+    check.add_argument(
+        "--reuse-current",
+        action="store_true",
+        help="Reuse only current passing receipts and prerequisites.",
+    )
+    check.add_argument(
+        "--output",
+        help="New user-owned output file for one managed check; never telemetry.",
+    )
+    jobs = subparsers.add_parser(
+        "jobs", help="Inspect managed verification jobs without polling."
+    )
+    jobs.add_argument("job_id", nargs="?")
+
     evidence = subparsers.add_parser(
         "evidence", help="Inspect revision-bound verification receipts."
     )
@@ -147,6 +167,34 @@ def build_parser() -> argparse.ArgumentParser:
     evidence_show = evidence_sub.add_parser("show")
     evidence_show.add_argument("receipt", type=int)
     evidence_show.add_argument("--json", action="store_true")
+    evidence_explain = evidence_sub.add_parser("explain")
+    evidence_explain.add_argument("--json", action="store_true")
+
+    workflow = subparsers.add_parser(
+        "workflow", help="Inspect explicit milestones and metadata-only rework."
+    )
+    workflow_sub = workflow.add_subparsers(dest="workflow_command", required=True)
+    workflow_sub.add_parser("status")
+    workflow_sub.add_parser("report")
+    workflow_record = workflow_sub.add_parser("record")
+    workflow_record.add_argument(
+        "--kind", choices=("retry", "correction"), required=True
+    )
+    from agent_efficiency.verification.workflow import CAUSES, PHASES, RATINGS
+
+    workflow_record.add_argument(
+        "--session", help="Bind annotations to an existing same-project session."
+    )
+    workflow_record.add_argument("--rating", choices=RATINGS, default="unrated")
+    workflow_record.add_argument("--phase", choices=PHASES, default="unknown")
+    workflow_record.add_argument("--cause", choices=CAUSES, required=True)
+    workflow_record.add_argument("--duration-ms", type=int, default=0)
+    workflow_record.add_argument("--cost-usd", type=float)
+    workflow_record.add_argument(
+        "--cost-basis",
+        choices=("estimate", "reported", "unavailable"),
+        default="unavailable",
+    )
 
     report = subparsers.add_parser("report", help="Summarize observed signals.")
     report.add_argument("--days", type=int, default=30)
@@ -359,6 +407,53 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "check":
         return _check_project(args, store)
+    if args.command == "workflow":
+        from agent_efficiency.verification.workflow import (
+            record_rework,
+            workflow_report,
+            workflow_status,
+        )
+
+        try:
+            if args.workflow_command == "status":
+                result = workflow_status(load_project_config(Path.cwd()), store)
+            elif args.workflow_command == "report":
+                result = workflow_report(store, Path.cwd())
+            else:
+                result = record_rework(
+                    store,
+                    Path.cwd(),
+                    kind=args.kind,
+                    cause=args.cause,
+                    duration_ms=args.duration_ms,
+                    cost_usd=args.cost_usd,
+                    cost_basis=args.cost_basis,
+                    session_id=args.session,
+                    rating=args.rating,
+                    phase=args.phase,
+                )
+            print(json.dumps(result, sort_keys=True))
+            return 0
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+    if args.command == "jobs":
+        from agent_efficiency.verification.jobs import JobLedger
+
+        try:
+            ledger = JobLedger(store)
+            project_key, _ = project_identity(str(Path.cwd()))
+            rows = ledger.report(project_key)
+            if args.job_id:
+                ledger.validate_id(args.job_id)
+                rows = [row for row in rows if row["job_id"] == args.job_id]
+                if not rows:
+                    raise ValueError("unknown verification job for this project")
+            print(json.dumps(rows, sort_keys=True))
+            return 0
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
     if args.command == "evidence":
         return _evidence(args, store)
     if args.command == "report":
@@ -677,6 +772,12 @@ timeout_seconds = 300
 
 def _check_project(args: argparse.Namespace, store: Store) -> int:
     try:
+        if args.reuse_current and (args.plan or args.background):
+            raise ValueError("--reuse-current is for synchronous execution only")
+        if args.plan and args.background:
+            raise ValueError("--plan and --background cannot be combined")
+        if args.output and (not args.background or args.changed):
+            raise ValueError("--output requires one explicit background check")
         config = load_project_config(Path.cwd())
         if args.changed:
             checks = _checks_for_changed_files(config)
@@ -694,7 +795,17 @@ def _check_project(args: argparse.Namespace, store: Store) -> int:
         if not checks:
             print("No configured checks apply to the current changes.")
             return 0
-        receipts = run_checks(config, checks, store)
+        if args.background:
+            from agent_efficiency.verification.background import launch
+
+            results = [
+                launch(config, check, store, output=args.output) for check in checks
+            ]
+            print(json.dumps(results, sort_keys=True))
+            return (
+                1 if any(item["job"]["state"] == "blocked" for item in results) else 0
+            )
+        receipts = run_checks(config, checks, store, reuse_current=args.reuse_current)
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2
@@ -703,6 +814,8 @@ def _check_project(args: argparse.Namespace, store: Store) -> int:
             f"Agent Efficiency check {receipt['check_id']}: "
             f"{receipt['result']} (receipt {receipt['receipt_id']})"
         )
+        if receipt.get("reused"):
+            print("  reused current evidence; check was not rerun")
         reason = reason_text(receipt)
         if reason:
             print(f"  reason: {receipt.get('reason_code') or 'unknown'}: {reason}")
@@ -760,6 +873,20 @@ def _evidence(args: argparse.Namespace, store: Store) -> int:
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2
+    if args.evidence_command == "explain":
+        from agent_efficiency.verification.workflow import evidence_explanations
+
+        values = evidence_explanations(config, store)
+        _emit(
+            values
+            if args.json
+            else "\n".join(
+                f"{item['check_id']}: {item['state']} ({item['reason']})"
+                for item in values
+            ),
+            args.json,
+        )
+        return 0
     project_key, _ = project_identity(str(config.root))
     state = workspace_state(config.root, config.digest)
     values = []
@@ -771,7 +898,7 @@ def _evidence(args: argparse.Namespace, store: Store) -> int:
                 "check_id": check.check_id,
                 "state": receipt_state(
                     latest,
-                    check_digest=check.digest,
+                    check_digest=check_identity(check, store),
                     workspace_digest=state.digest,
                     max_age_seconds=check.max_age_seconds,
                 ),
