@@ -4,7 +4,9 @@ This guide helps you install Agent Efficiency in Claude Code, Codex, or
 Cursor, install the terminal command, keep both up to date, add the Claude Code
 status line, and remove everything again.
 
-The tagged examples install version 0.2.2. For an unreleased
+The tagged examples install version 0.3.0. Existing installations must follow the
+[schema-9 coordinated upgrade](schema-9-upgrade.md) before installing: stop writers,
+back up the whole data folder, and update every runtime together. For an unreleased
 checkout, use the [local development steps](development.md#try-your-checkout-in-a-host).
 
 ## Before you start
@@ -31,7 +33,7 @@ final `doctor` check. It needs Claude Code, Python 3.11 or newer, and pipx or
 uv.
 
 ```bash
-git clone --branch v0.2.2 https://github.com/agent-efficiency/agent-efficiency.git
+git clone --branch v0.3.0 https://github.com/agent-efficiency/agent-efficiency.git
 cd agent-efficiency
 bash install.sh
 ```
@@ -61,7 +63,7 @@ Options:
 | --- | --- |
 | `--data-dir DIR` | Keeps the data in DIR. Creates DIR with mode 0700 and sets `env.AGENT_EFFICIENCY_DATA` in the Claude Code settings. |
 | `--vault PATH` | Registers a vault tree and updates its git hooks. Repeat it for each tree. Create trees first; see [Vault](vault.md). |
-| `--ref TAG` | Installs both the plugin and command from the same release tag. The default is `v0.2.2`. |
+| `--ref TAG` | Installs both the plugin and command from the same release tag. The default is `v0.3.0`. |
 | `--no-command` | Skips the command install. An `agent-efficiency` command must already be on PATH. |
 
 For example, with your own data folder and two vault trees:
@@ -77,7 +79,7 @@ set up Codex or Cursor; follow the steps below for those.
 ## Claude Code by hand
 
 ```bash
-claude plugin marketplace add "agent-efficiency/agent-efficiency#v0.2.2"
+claude plugin marketplace add "agent-efficiency/agent-efficiency#v0.3.0"
 claude plugin install agent-efficiency@agent-efficiency
 ```
 
@@ -94,16 +96,16 @@ claude plugin list
 Installed plugins:
 
   ❯ agent-efficiency@agent-efficiency
-    Version: 0.2.2
+    Version: 0.3.0
     Scope: user
     Status: ✔ enabled
 ```
 
 To select another release, use its tag for both the marketplace and the
-terminal command. The examples pin version 0.2.2:
+terminal command. The examples pin version 0.3.0:
 
 ```bash
-claude plugin marketplace add "agent-efficiency/agent-efficiency#v0.2.2"
+claude plugin marketplace add "agent-efficiency/agent-efficiency#v0.3.0"
 claude plugin install agent-efficiency@agent-efficiency
 ```
 
@@ -114,12 +116,12 @@ command in your own terminal: `doctor`, `check`, `report`, the `vault`
 commands, and the vault git hooks all run there.
 
 ```bash
-pipx install git+https://github.com/agent-efficiency/agent-efficiency@v0.2.2
+pipx install git+https://github.com/agent-efficiency/agent-efficiency@v0.3.0
 agent-efficiency --version
 agent-efficiency doctor
 ```
 
-`--version` prints `0.2.2`. `doctor` checks Python, the data folder, and the
+`--version` prints `0.3.0`. `doctor` checks Python, the data folder, and the
 copy of the plugin each host installed. Its first line is
 `Agent Efficiency doctor: OK` when everything is ready.
 
@@ -128,7 +130,7 @@ on your PATH:
 
 ```bash
 python3 -m venv ~/.venvs/agent-efficiency
-~/.venvs/agent-efficiency/bin/pip install git+https://github.com/agent-efficiency/agent-efficiency@v0.2.2
+~/.venvs/agent-efficiency/bin/pip install git+https://github.com/agent-efficiency/agent-efficiency@v0.3.0
 export PATH="$HOME/.venvs/agent-efficiency/bin:$PATH"
 agent-efficiency --version
 ```
@@ -163,16 +165,15 @@ codex plugin list
 
 ```text
 PLUGIN                             STATUS              VERSION                     SOURCE
-agent-efficiency@agent-efficiency  installed, enabled  0.2.2+codex.<build time>   ...
+agent-efficiency@agent-efficiency  installed, enabled  0.3.0                       ...
 ```
 
-The `+codex.<build time>` part is a build stamp that tells Codex a new release
-is a new version.
+Version 0.3.0 uses the same release version across all host manifests.
 
 To pin a release, add the marketplace with `--ref`:
 
 ```bash
-codex plugin marketplace add agent-efficiency/agent-efficiency --ref v0.2.2
+codex plugin marketplace add agent-efficiency/agent-efficiency --ref v0.3.0
 codex plugin add agent-efficiency@agent-efficiency
 ```
 
@@ -183,7 +184,7 @@ is a copy of the plugin inside Cursor's local plugin folder. A link to a
 folder outside that location does not load.
 
 ```bash
-git clone --branch v0.2.2 https://github.com/agent-efficiency/agent-efficiency.git ~/src/agent-efficiency
+git clone --branch v0.3.0 https://github.com/agent-efficiency/agent-efficiency.git ~/src/agent-efficiency
 mkdir -p ~/.cursor/plugins/local
 cp -R ~/src/agent-efficiency/plugins/agent-efficiency ~/.cursor/plugins/local/agent-efficiency
 ```
@@ -193,7 +194,7 @@ that Agent Efficiency is installed. `agent-efficiency doctor` checks this
 folder:
 
 ```text
-Cursor: ready, 0.2.2 (user scope) at /home/you/.cursor/plugins/local/agent-efficiency
+Cursor: ready, 0.3.0 (user scope) at /home/you/.cursor/plugins/local/agent-efficiency
 ```
 
 For an existing install, including an outside link, keep the old entry as a
@@ -202,7 +203,7 @@ already exist:
 
 ```bash
 git -C ~/src/agent-efficiency fetch --tags
-git -C ~/src/agent-efficiency checkout v0.2.2
+git -C ~/src/agent-efficiency checkout v0.3.0
 mv ~/.cursor/plugins/local/agent-efficiency ~/.cursor/plugins/local/agent-efficiency-backup
 cp -R ~/src/agent-efficiency/plugins/agent-efficiency ~/.cursor/plugins/local/agent-efficiency
 ```
@@ -217,8 +218,9 @@ starts a local session record.
 Read the [changelog](../CHANGELOG.md) first. Some releases ask you to do
 something after the upgrade.
 
-For a release that introduces schema 8, follow the
-[coordinated database upgrade](schema-8-upgrade.md) before resuming sessions.
+Version 0.3.0 introduces schema 9. Follow the
+[coordinated database upgrade](schema-9-upgrade.md) before installing or resuming
+sessions. Older runtimes must not write to an upgraded data folder.
 
 ### Claude Code
 
@@ -227,7 +229,7 @@ If you used the installer, check out the new release tag in your clone (here
 
 ```bash
 git -C ~/agent-efficiency fetch --tags
-git -C ~/agent-efficiency checkout v0.2.2
+git -C ~/agent-efficiency checkout v0.3.0
 bash ~/agent-efficiency/install.sh
 ```
 
@@ -249,12 +251,12 @@ also removes the plugin.
 
 ```bash
 claude plugin marketplace remove agent-efficiency
-claude plugin marketplace add "agent-efficiency/agent-efficiency#v0.2.2"
+claude plugin marketplace add "agent-efficiency/agent-efficiency#v0.3.0"
 claude plugin install agent-efficiency@agent-efficiency
 claude plugin list
 ```
 
-`claude plugin list` must show `Version: 0.2.2`.
+`claude plugin list` must show `Version: 0.3.0`.
 
 Coming from 0.2.0 or earlier? Those releases kept session history in Claude
 Code's plugin data folder, which removing the marketplace deletes. Install the
@@ -276,7 +278,7 @@ If you pinned a ref, remove the marketplace and add it again with the new ref:
 
 ```bash
 codex plugin marketplace remove agent-efficiency
-codex plugin marketplace add agent-efficiency/agent-efficiency --ref v0.2.2
+codex plugin marketplace add agent-efficiency/agent-efficiency --ref v0.3.0
 codex plugin add agent-efficiency@agent-efficiency
 codex plugin list
 ```
@@ -284,7 +286,7 @@ codex plugin list
 ### The terminal command
 
 ```bash
-pipx install --force git+https://github.com/agent-efficiency/agent-efficiency@v0.2.2
+pipx install --force git+https://github.com/agent-efficiency/agent-efficiency@v0.3.0
 agent-efficiency --version
 ```
 

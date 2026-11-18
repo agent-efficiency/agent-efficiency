@@ -1,9 +1,11 @@
-# Schema 9 coordinated upgrade (development)
+# Schema 9 coordinated upgrade
 
-This unreleased schema adds closed environment/structured-result reasons and
-metadata-only managed-job, result-summary and workflow-annotation tables. It does
-not authorize upgrading an active installation. Complete the full tests, migration
-rehearsal, distribution checks and review first.
+Version 0.3.0 adds closed environment/structured-result reasons and metadata-only
+managed-job, result-summary and workflow-annotation tables. Publication does not
+upgrade an active installation. Follow this coordinated procedure before changing
+any existing command, plugin or source loader. Synthetic schema-7 and schema-8
+migration/rollback rehearsals passed; live installation verification remains a
+separate requirement.
 
 ## Before installing
 

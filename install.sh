@@ -7,7 +7,7 @@
 # hooks up to date. Run it with --help for details.
 set -euo pipefail
 
-DEFAULT_REF="v0.2.2"
+DEFAULT_REF="v0.3.0"
 REPOSITORY="agent-efficiency/agent-efficiency"
 PLUGIN="agent-efficiency@agent-efficiency"
 MARKETPLACE="agent-efficiency"
